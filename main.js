@@ -133,11 +133,20 @@ async function initPiGlobals() {
   sharedModelRegistry = new ModelRegistry(sharedAuth, resolve(AGENT_DIR, 'models.json'));
   const available = await sharedModelRegistry.getAvailable();
   if (!available.length) throw new Error('没有可用的模型，请检查 GEMINI_API_KEY 或 MOONSHOT_API_KEY');
-  // 获取模型名称的辅助函数
-  const getModelName = (m) => typeof m === 'string' ? m : (m?.model || m?.id || String(m));
+  // 调试：输出 available 的结构
+  console.log('[DEBUG] Available models:', JSON.stringify(available.slice(0, 3), null, 2));
+  // 获取完整模型标识符 (provider/model-id 格式)
+  const getFullModelId = (m) => {
+    if (typeof m === 'string') return m;
+    // PI SDK 返回的格式可能是 { provider, model } 或 { id } 或其他
+    if (m?.provider && m?.model) return `${m.provider}/${m.model}`;
+    if (m?.provider && m?.id) return `${m.provider}/${m.id}`;
+    return m?.model || m?.id || String(m);
+  };
   // 优先选择 Gemini 模型
-  const geminiModel = available.find(m => getModelName(m).startsWith('gemini'));
-  sharedModel = geminiModel ? getModelName(geminiModel) : getModelName(available[0]);
+  const geminiModel = available.find(m => getFullModelId(m).includes('gemini'));
+  sharedModel = geminiModel ? getFullModelId(geminiModel) : getFullModelId(available[0]);
+  console.log('[DEBUG] Selected model:', sharedModel);
 
   sharedSettingsManager = SettingsManager.inMemory({
     compaction: { enabled: false },

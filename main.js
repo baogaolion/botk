@@ -283,11 +283,14 @@ async function runAgent(session, userText, progress) {
   let lastError = null;
 
   const unsub = session.subscribe((event) => {
+    // 调试：打印所有事件
+    console.log('[DEBUG] Event type:', event.type);
     if (event.type === 'error') {
       console.error('[DEBUG] Error event:', JSON.stringify(event, null, 2));
       lastError = event.error;
     }
     if (event.type === 'auto_retry_start') {
+      console.error('[DEBUG] Auto retry:', JSON.stringify(event, null, 2));
       // 解析错误信息
       try {
         const errData = JSON.parse(event.errorMessage || '{}');
@@ -329,7 +332,11 @@ async function runAgent(session, userText, progress) {
   });
 
   try {
+    console.log('[DEBUG] Calling session.prompt with:', userText.slice(0, 100));
+    console.log('[DEBUG] session.agent exists:', !!session.agent);
+    console.log('[DEBUG] session.agent.streamFn exists:', !!session.agent?.streamFn);
     await session.prompt(userText);
+    console.log('[DEBUG] session.prompt completed, fullResponse length:', fullResponse.length);
   } finally {
     unsub();
   }

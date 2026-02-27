@@ -134,8 +134,8 @@ async function initPiGlobals() {
   const available = await sharedModelRegistry.getAvailable();
   if (!available.length) throw new Error('没有可用的模型，请检查 GEMINI_API_KEY 或 MOONSHOT_API_KEY');
   // 优先选择 Gemini 模型
-  const geminiModel = available.find(m => m.model.startsWith('gemini'));
-  sharedModel = geminiModel ? geminiModel.model : available[0].model;
+  const geminiModel = available.find(m => m && m.model && m.model.startsWith('gemini'));
+  sharedModel = geminiModel ? geminiModel.model : (available[0]?.model || available[0]);
 
   sharedSettingsManager = SettingsManager.inMemory({
     compaction: { enabled: false },

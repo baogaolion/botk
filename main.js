@@ -285,6 +285,10 @@ async function runAgent(session, userText, progress) {
   const unsub = session.subscribe((event) => {
     // 调试：打印所有事件
     console.log('[DEBUG] Event type:', event.type);
+    // 打印完整事件内容用于调试
+    if (event.type === 'message_start' || event.type === 'message_end') {
+      console.log('[DEBUG] Full event:', JSON.stringify(event, null, 2)?.slice(0, 1000));
+    }
     if (event.type === 'error') {
       console.error('[DEBUG] Error event:', JSON.stringify(event, null, 2));
       lastError = event.error;

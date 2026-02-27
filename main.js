@@ -425,9 +425,14 @@ async function runAgent(session, userText, progress, ctx) {
   const initStreamMsg = async () => {
     if (streamMsgId || useDraft) return;
     try {
-      const msg = await ctx.reply('💭 ...', { parse_mode: 'Markdown' });
+      const msg = await ctx.reply('💭 \\.\\.\\.', { parse_mode: 'MarkdownV2' });
       streamMsgId = msg.message_id;
-    } catch {}
+    } catch {
+      try {
+        const msg = await ctx.reply('💭 ...');
+        streamMsgId = msg.message_id;
+      } catch {}
+    }
   };
 
   // 执行一次更新
@@ -455,12 +460,14 @@ async function runAgent(session, userText, progress, ctx) {
           message_thread_id: 1
         });
       } else if (streamMsgId && chatId) {
-        // 回退到 editMessageText
-        await ctx.api.editMessageText(chatId, streamMsgId, displayText, { parse_mode: 'Markdown' });
+        // 回退到 editMessageText（也支持 MarkdownV2）
+        const escapedText = escapeMarkdownV2(displayText);
+        await ctx.api.editMessageText(chatId, streamMsgId, escapedText, { parse_mode: 'MarkdownV2' });
       }
     } catch {
       if (!useDraft && streamMsgId && chatId) {
         try {
+          // 如果 MarkdownV2 失败，尝试纯文本
           await ctx.api.editMessageText(chatId, streamMsgId, displayText);
         } catch {}
       }

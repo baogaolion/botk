@@ -34,6 +34,12 @@ const PG_POLL_INTERVAL = Number(process.env.PG_POLL_INTERVAL) || 30000;
 // 用户文档目录（用于文件分析和上传保存）
 const USER_DOCS_DIR = process.env.USER_DOCS_DIR || '/home/administrator/Documents';
 
+// MarkdownV2 特殊字符转义
+function escapeMarkdownV2(text) {
+  // MarkdownV2 需要转义的字符: _ * [ ] ( ) ~ ` > # + - = | { } . !
+  return text.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+}
+
 // ==================== 可用模型配置 ====================
 // 定义支持的模型列表，根据环境变量中的 API Key 动态启用
 // 顺序决定默认优先级：DeepSeek > OpenAI > Gemini > Kimi
@@ -399,7 +405,11 @@ async function runAgent(session, userText, progress, ctx) {
     try {
       // 生成唯一的 draft_id
       draftId = Date.now() % 2147483647 || 1; // 确保非零
-      await ctx.api.sendMessageDraft(chatId, draftId, '💭 ...');
+      // message_thread_id: 1 是私聊中的默认主题
+      await ctx.api.sendMessageDraft(chatId, draftId, '💭 ...', {
+        parse_mode: 'MarkdownV2',
+        message_thread_id: 1
+      });
       useDraft = true;
       return true;
     } catch (err) {
@@ -438,7 +448,12 @@ async function runAgent(session, userText, progress, ctx) {
     try {
       if (useDraft && draftId) {
         // 使用 sendMessageDraft 更新（更平滑）
-        await ctx.api.sendMessageDraft(chatId, draftId, displayText);
+        // MarkdownV2 需要转义特殊字符
+        const escapedText = escapeMarkdownV2(displayText);
+        await ctx.api.sendMessageDraft(chatId, draftId, escapedText, {
+          parse_mode: 'MarkdownV2',
+          message_thread_id: 1
+        });
       } else if (streamMsgId && chatId) {
         // 回退到 editMessageText
         await ctx.api.editMessageText(chatId, streamMsgId, displayText, { parse_mode: 'Markdown' });

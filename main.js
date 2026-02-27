@@ -33,7 +33,11 @@ const PG_POLL_INTERVAL = Number(process.env.PG_POLL_INTERVAL) || 30000;
 
 // ==================== 可用模型配置 ====================
 // 定义支持的模型列表，根据环境变量中的 API Key 动态启用
+// 顺序决定默认优先级：OpenAI > Gemini > Kimi
 const MODEL_DEFINITIONS = [
+  { provider: 'openai', id: 'gpt-4o', name: 'GPT-4o', envKey: 'OPENAI_API_KEY' },
+  { provider: 'openai', id: 'gpt-4o-mini', name: 'GPT-4o Mini', envKey: 'OPENAI_API_KEY' },
+  { provider: 'openai', id: 'gpt-4-turbo', name: 'GPT-4 Turbo', envKey: 'OPENAI_API_KEY' },
   { provider: 'google', id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', envKey: 'GEMINI_API_KEY' },
   { provider: 'google', id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', envKey: 'GEMINI_API_KEY' },
   { provider: 'google', id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', envKey: 'GEMINI_API_KEY' },
@@ -276,21 +280,28 @@ function evictSessions() {
 async function runAgent(session, userText, progress) {
   let fullResponse = '';
   let toolName = '';
+  let lastError = null;
 
   const unsub = session.subscribe((event) => {
-    // 调试：打印所有事件类型和详细信息
-    console.log('[DEBUG] Event type:', event.type);
     if (event.type === 'error') {
       console.error('[DEBUG] Error event:', JSON.stringify(event, null, 2));
+      lastError = event.error;
     }
     if (event.type === 'auto_retry_start') {
-      console.error('[DEBUG] Auto retry:', JSON.stringify(event, null, 2));
-    }
-    if (event.type === 'message_start') {
-      console.log('[DEBUG] message_start:', JSON.stringify(event.message?.role || event, null, 2));
-    }
-    if (event.type === 'message_end') {
-      console.log('[DEBUG] message_end content:', JSON.stringify(event.message?.content?.slice(0, 200) || event, null, 2));
+      // 解析错误信息
+      try {
+        const errData = JSON.parse(event.errorMessage || '{}');
+        const innerErr = JSON.parse(errData.error?.message || '{}');
+        if (innerErr.error?.code === 429) {
+          lastError = { status: 429, message: '请求过于频繁或配额已用完' };
+        } else if (innerErr.error?.code >= 500) {
+          lastError = { status: innerErr.error.code, message: 'AI 服务暂时不可用' };
+        } else {
+          lastError = { status: innerErr.error?.code || 0, message: innerErr.error?.message || event.errorMessage };
+        }
+      } catch {
+        lastError = { status: 0, message: event.errorMessage };
+      }
     }
     if (event.type !== 'message_update') return;
     const e = event.assistantMessageEvent;
@@ -318,15 +329,16 @@ async function runAgent(session, userText, progress) {
   });
 
   try {
-    console.log('[DEBUG] Calling session.prompt with:', userText.slice(0, 100));
-    console.log('[DEBUG] session.agent exists:', !!session.agent);
-    console.log('[DEBUG] session.agent.streamFn exists:', !!session.agent?.streamFn);
-    const result = await session.prompt(userText);
-    console.log('[DEBUG] session.prompt result:', JSON.stringify(result, null, 2)?.slice(0, 500));
-    console.log('[DEBUG] session.prompt completed, fullResponse length:', fullResponse.length);
-    console.log('[DEBUG] fullResponse preview:', fullResponse.slice(0, 200));
+    await session.prompt(userText);
   } finally {
     unsub();
+  }
+
+  // 如果有错误且没有响应，抛出错误
+  if (lastError && !fullResponse.trim()) {
+    const err = new Error(lastError.message || 'AI 请求失败');
+    err.status = lastError.status;
+    throw err;
   }
 
   return fullResponse;
@@ -374,8 +386,8 @@ async function sendLongText(ctx, text, keyboard) {
 
 async function main() {
   if (!process.env.BOT_TOKEN) { console.error('❌ 缺少 BOT_TOKEN'); process.exit(1); }
-  if (!process.env.GEMINI_API_KEY && !process.env.MOONSHOT_API_KEY) {
-    console.error('❌ 缺少 AI API Key，请设置 GEMINI_API_KEY 或 MOONSHOT_API_KEY');
+  if (!process.env.OPENAI_API_KEY && !process.env.GEMINI_API_KEY && !process.env.MOONSHOT_API_KEY) {
+    console.error('❌ 缺少 AI API Key，请设置 OPENAI_API_KEY、GEMINI_API_KEY 或 MOONSHOT_API_KEY');
     process.exit(1);
   }
 

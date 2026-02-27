@@ -12,7 +12,7 @@ import {
   DefaultResourceLoader,
   SettingsManager,
 } from '@mariozechner/pi-coding-agent';
-import { getModel } from '@mariozechner/pi-ai';
+import { getModel, streamSimple } from '@mariozechner/pi-ai';
 import { initDb, closeDb, userRepo, fileRepo, taskRepo, dbStats, allowRepo } from './db.js';
 
 // ==================== 配置 ====================
@@ -229,6 +229,8 @@ async function createPiSession(admin = false) {
     sessionManager: SessionManager.inMemory(),
     settingsManager: sharedSettingsManager,
   });
+  // 设置流式处理函数（必需）
+  session.agent.streamFn = streamSimple;
   return session;
 }
 

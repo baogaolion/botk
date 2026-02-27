@@ -275,8 +275,7 @@ async function createPiSession(admin = false) {
   const model = getCurrentModel();
   if (!model) throw new Error('没有可用的模型');
   
-  // 为自定义模型（如 DeepSeek）准备 API key
-  const sessionOptions = {
+  const { session } = await createAgentSession({
     cwd: process.cwd(),
     agentDir: AGENT_DIR,
     model,
@@ -285,16 +284,17 @@ async function createPiSession(admin = false) {
     resourceLoader: admin ? sharedLoader : sharedUserLoader,
     sessionManager: SessionManager.inMemory(),
     settingsManager: sharedSettingsManager,
-  };
+  });
   
-  // 如果是 DeepSeek 自定义模型，需要传递 API key
+  // 设置流式处理函数，为自定义模型（如 DeepSeek）传递 API key
   if (model.provider === 'deepseek' && process.env.DEEPSEEK_API_KEY) {
-    sessionOptions.apiKey = process.env.DEEPSEEK_API_KEY;
+    session.agent.streamFn = (model, context) => streamSimple(model, context, {
+      apiKey: process.env.DEEPSEEK_API_KEY,
+    });
+  } else {
+    session.agent.streamFn = streamSimple;
   }
   
-  const { session } = await createAgentSession(sessionOptions);
-  // 设置流式处理函数（必需）
-  session.agent.streamFn = streamSimple;
   return session;
 }
 

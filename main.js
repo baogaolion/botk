@@ -7,12 +7,12 @@ import pg from 'pg';
 import {
   AuthStorage,
   createAgentSession,
-  ModelRegistry,
   SessionManager,
   codingTools,
   DefaultResourceLoader,
   SettingsManager,
 } from '@mariozechner/pi-coding-agent';
+import { getModel } from '@mariozechner/pi-ai';
 import { initDb, closeDb, userRepo, fileRepo, taskRepo, dbStats, allowRepo } from './db.js';
 
 // ==================== 配置 ====================
@@ -30,6 +30,24 @@ const SESSION_MAX = 20;
 
 const PG_CONNECTION_STRING = process.env.PG_CONNECTION_STRING || '';
 const PG_POLL_INTERVAL = Number(process.env.PG_POLL_INTERVAL) || 30000;
+
+// ==================== 可用模型配置 ====================
+// 定义支持的模型列表，根据环境变量中的 API Key 动态启用
+const MODEL_DEFINITIONS = [
+  { provider: 'google', id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', envKey: 'GEMINI_API_KEY' },
+  { provider: 'google', id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', envKey: 'GEMINI_API_KEY' },
+  { provider: 'google', id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', envKey: 'GEMINI_API_KEY' },
+  { provider: 'kimi', id: 'moonshot-v1-32k', name: 'Kimi 32K', envKey: 'MOONSHOT_API_KEY' },
+  { provider: 'kimi', id: 'moonshot-v1-128k', name: 'Kimi 128K', envKey: 'MOONSHOT_API_KEY' },
+];
+
+// 获取当前可用的模型（API Key 已配置的）
+function getAvailableModels() {
+  return MODEL_DEFINITIONS.filter(m => process.env[m.envKey]);
+}
+
+// 当前选择的模型索引（默认第一个可用模型）
+let currentModelIndex = 0;
 
 // ==================== 进度管理 ====================
 
@@ -119,36 +137,34 @@ class ProgressMessage {
 
 // ==================== PI Agent (全局共享) ====================
 
-let sharedAuth, sharedModelRegistry, sharedSettingsManager, sharedLoader, sharedUserLoader, sharedModel;
+let sharedSettingsManager, sharedLoader, sharedUserLoader, sharedModel;
+
+// 获取当前选择的模型对象
+function getCurrentModel() {
+  const available = getAvailableModels();
+  if (!available.length) return null;
+  // 确保索引有效
+  if (currentModelIndex >= available.length) currentModelIndex = 0;
+  const modelDef = available[currentModelIndex];
+  return getModel(modelDef.provider, modelDef.id);
+}
+
+// 获取当前模型的显示名称
+function getCurrentModelName() {
+  const available = getAvailableModels();
+  if (!available.length) return '无可用模型';
+  if (currentModelIndex >= available.length) currentModelIndex = 0;
+  return available[currentModelIndex].name;
+}
 
 async function initPiGlobals() {
-  sharedAuth = new AuthStorage(resolve(AGENT_DIR, 'auth.json'));
-  // 优先使用 Gemini，其次 Kimi
-  // 注意：PI SDK 可能使用 'google' 或 'gemini' 作为 provider 名称，同时设置两个
-  if (process.env.GEMINI_API_KEY) {
-    sharedAuth.setRuntimeApiKey('google', process.env.GEMINI_API_KEY);
-    sharedAuth.setRuntimeApiKey('gemini', process.env.GEMINI_API_KEY);
-  }
-  if (process.env.MOONSHOT_API_KEY) {
-    sharedAuth.setRuntimeApiKey('kimi', process.env.MOONSHOT_API_KEY);
-  }
-  sharedModelRegistry = new ModelRegistry(sharedAuth, resolve(AGENT_DIR, 'models.json'));
-  const available = await sharedModelRegistry.getAvailable();
+  const available = getAvailableModels();
   if (!available.length) throw new Error('没有可用的模型，请检查 GEMINI_API_KEY 或 MOONSHOT_API_KEY');
-  // 调试：输出 available 的结构
-  console.log('[DEBUG] Available models:', JSON.stringify(available.slice(0, 3), null, 2));
-  // 获取完整模型标识符 (provider/model-id 格式)
-  const getFullModelId = (m) => {
-    if (typeof m === 'string') return m;
-    // PI SDK 返回的格式可能是 { provider, model } 或 { id } 或其他
-    if (m?.provider && m?.model) return `${m.provider}/${m.model}`;
-    if (m?.provider && m?.id) return `${m.provider}/${m.id}`;
-    return m?.model || m?.id || String(m);
-  };
-  // 优先选择 Gemini 模型
-  const geminiModel = available.find(m => getFullModelId(m).includes('gemini'));
-  sharedModel = geminiModel ? getFullModelId(geminiModel) : getFullModelId(available[0]);
-  console.log('[DEBUG] Selected model:', sharedModel);
+  
+  // 获取默认模型
+  sharedModel = getCurrentModel();
+  console.log('[DEBUG] Available models:', available.map(m => m.name).join(', '));
+  console.log('[DEBUG] Selected model:', getCurrentModelName());
 
   sharedSettingsManager = SettingsManager.inMemory({
     compaction: { enabled: false },
@@ -199,13 +215,15 @@ async function initPiGlobals() {
 }
 
 async function createPiSession(admin = false) {
+  // 每次创建会话时使用当前选择的模型
+  const model = getCurrentModel();
+  if (!model) throw new Error('没有可用的模型');
+  
   const { session } = await createAgentSession({
     cwd: process.cwd(),
     agentDir: AGENT_DIR,
-    model: sharedModel,
+    model,
     thinkingLevel: 'off',
-    authStorage: sharedAuth,
-    modelRegistry: sharedModelRegistry,
     tools: codingTools,
     resourceLoader: admin ? sharedLoader : sharedUserLoader,
     sessionManager: SessionManager.inMemory(),
@@ -491,7 +509,7 @@ async function main() {
       `💾 内存: ${Math.round(mem.rss / 1024 / 1024)}MB\n` +
       `🔧 内置工具: read, write, edit, bash\n` +
       `🔌 预置技能: find-skills\n` +
-      `📡 模型: ${sharedModel}\n` +
+      `📡 模型: ${getCurrentModelName()}\n` +
       `🔄 活跃会话: ${sessions.size} | 运行中: ${runningTasks.size}\n` +
       `🗄 数据库: ${db.sizeMB}MB (${db.userCount}用户, ${db.taskCount}任务, ${db.fileCount}文件)`,
       { reply_markup: new InlineKeyboard().text('🏠 主菜单', 'main_menu') }
@@ -619,6 +637,55 @@ async function main() {
     });
   });
 
+  // ==================== 模型管理 ====================
+
+  bot.command('models', async (ctx) => {
+    if (!isAdmin(ctx)) return;
+    const available = getAvailableModels();
+    if (!available.length) {
+      await ctx.reply('❌ 没有可用的模型，请检查 API Key 配置。');
+      return;
+    }
+    
+    let text = '📡 可用模型\n\n';
+    const kb = new InlineKeyboard();
+    available.forEach((m, i) => {
+      const isCurrent = i === currentModelIndex;
+      text += `${isCurrent ? '✅' : '⬜'} ${i + 1}. ${m.name} (${m.provider})\n`;
+      kb.text(`${isCurrent ? '✅' : ''} ${m.name}`, `set_model_${i}`);
+      if ((i + 1) % 2 === 0) kb.row();
+    });
+    kb.row().text('🏠 主菜单', 'main_menu');
+    
+    text += `\n当前: ${getCurrentModelName()}`;
+    await ctx.reply(text, { reply_markup: kb });
+  });
+
+  // 处理模型选择回调
+  bot.callbackQuery(/^set_model_(\d+)$/, async (ctx) => {
+    if (!isAdmin(ctx)) {
+      await ctx.answerCallbackQuery({ text: '仅管理员可切换模型' });
+      return;
+    }
+    const newIndex = parseInt(ctx.match[1], 10);
+    const available = getAvailableModels();
+    if (newIndex >= 0 && newIndex < available.length) {
+      const oldModel = getCurrentModelName();
+      currentModelIndex = newIndex;
+      // 清除所有会话，让新对话使用新模型
+      for (const key of sessions.keys()) {
+        deleteSession(key);
+      }
+      await ctx.answerCallbackQuery({ text: `已切换到 ${getCurrentModelName()}` });
+      await ctx.reply(
+        `📡 模型已切换\n\n${oldModel} → ${getCurrentModelName()}\n\n所有会话已重置，新对话将使用新模型。`,
+        { reply_markup: new InlineKeyboard().text('🏠 主菜单', 'main_menu') }
+      );
+    } else {
+      await ctx.answerCallbackQuery({ text: '无效的模型索引' });
+    }
+  });
+
   bot.command('submissions', async (ctx) => {
     if (!isAdmin(ctx)) return;
     if (!pgPool) {
@@ -687,9 +754,33 @@ async function main() {
       `💾 内存: ${Math.round(mem.rss / 1024 / 1024)}MB\n` +
       `🔧 工具: read, write, edit, bash\n` +
       `🔌 技能: find-skills\n` +
-      `📡 模型: ${sharedModel}`,
-      { reply_markup: new InlineKeyboard().text('🏠 主菜单', 'main_menu') }
+      `📡 模型: ${getCurrentModelName()}`,
+      { reply_markup: new InlineKeyboard().text('📡 切换模型', 'show_models').row().text('🏠 主菜单', 'main_menu') }
     );
+  });
+
+  bot.callbackQuery('show_models', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    if (!isAdmin(ctx)) {
+      await ctx.reply('⚠️ 仅管理员可切换模型。', { reply_markup: new InlineKeyboard().text('🏠 主菜单', 'main_menu') });
+      return;
+    }
+    const available = getAvailableModels();
+    if (!available.length) {
+      await ctx.reply('❌ 没有可用的模型，请检查 API Key 配置。');
+      return;
+    }
+    let text = '📡 可用模型\n\n';
+    const kb = new InlineKeyboard();
+    available.forEach((m, i) => {
+      const isCurrent = i === currentModelIndex;
+      text += `${isCurrent ? '✅' : '⬜'} ${i + 1}. ${m.name} (${m.provider})\n`;
+      kb.text(`${isCurrent ? '✅' : ''} ${m.name}`, `set_model_${i}`);
+      if ((i + 1) % 2 === 0) kb.row();
+    });
+    kb.row().text('🏠 主菜单', 'main_menu');
+    text += `\n当前: ${getCurrentModelName()}`;
+    await ctx.reply(text, { reply_markup: kb });
   });
 
   bot.callbackQuery('skills_list', async (ctx) => {
@@ -961,6 +1052,7 @@ async function main() {
       { command: 'start', description: '主菜单' },
       { command: 'help', description: '帮助' },
       { command: 'status', description: '系统状态' },
+      { command: 'models', description: '切换模型' },
       { command: 'submissions', description: '客户咨询' },
       { command: 'adduser', description: '添加用户' },
       { command: 'removeuser', description: '移除用户' },
@@ -989,7 +1081,7 @@ async function main() {
   console.log('🤖 botk 已启动');
   console.log(`🔧 工具: read, write, edit, bash`);
   console.log(`🔌 技能: find-skills`);
-  console.log(`📡 模型: ${sharedModel}`);
+  console.log(`📡 模型: ${getCurrentModelName()}`);
   console.log(`🗄 数据库: data/botk.db`);
   if (ADMIN_USER) console.log(`👑 管理员: ${ADMIN_USER}`);
   else console.log('⚠️  未设置 ADMIN_USER');

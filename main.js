@@ -33,8 +33,10 @@ const PG_POLL_INTERVAL = Number(process.env.PG_POLL_INTERVAL) || 30000;
 
 // ==================== 可用模型配置 ====================
 // 定义支持的模型列表，根据环境变量中的 API Key 动态启用
-// 顺序决定默认优先级：OpenAI > Gemini > Kimi
+// 顺序决定默认优先级：DeepSeek > OpenAI > Gemini > Kimi
 const MODEL_DEFINITIONS = [
+  { provider: 'deepseek', id: 'deepseek-chat', name: 'DeepSeek Chat', envKey: 'DEEPSEEK_API_KEY' },
+  { provider: 'deepseek', id: 'deepseek-reasoner', name: 'DeepSeek R1', envKey: 'DEEPSEEK_API_KEY' },
   { provider: 'openai', id: 'gpt-4o', name: 'GPT-4o', envKey: 'OPENAI_API_KEY' },
   { provider: 'openai', id: 'gpt-4o-mini', name: 'GPT-4o Mini', envKey: 'OPENAI_API_KEY' },
   { provider: 'openai', id: 'gpt-4-turbo', name: 'GPT-4 Turbo', envKey: 'OPENAI_API_KEY' },
@@ -285,9 +287,17 @@ async function runAgent(session, userText, progress) {
   const unsub = session.subscribe((event) => {
     // 调试：打印所有事件
     console.log('[DEBUG] Event type:', event.type);
-    // 打印完整事件内容用于调试
-    if (event.type === 'message_start' || event.type === 'message_end') {
-      console.log('[DEBUG] Full event:', JSON.stringify(event, null, 2)?.slice(0, 1000));
+    // 捕获 message_end 中的错误
+    if (event.type === 'message_end' && event.message?.errorMessage) {
+      console.error('[DEBUG] message_end error:', event.message.errorMessage);
+      const msg = event.message.errorMessage;
+      if (msg.includes('quota') || msg.includes('429')) {
+        lastError = { status: 429, message: '请求过于频繁或配额已用完' };
+      } else if (msg.includes('500') || msg.includes('unavailable')) {
+        lastError = { status: 500, message: 'AI 服务暂时不可用' };
+      } else {
+        lastError = { status: 0, message: msg.slice(0, 200) };
+      }
     }
     if (event.type === 'error') {
       console.error('[DEBUG] Error event:', JSON.stringify(event, null, 2));
@@ -397,8 +407,8 @@ async function sendLongText(ctx, text, keyboard) {
 
 async function main() {
   if (!process.env.BOT_TOKEN) { console.error('❌ 缺少 BOT_TOKEN'); process.exit(1); }
-  if (!process.env.OPENAI_API_KEY && !process.env.GEMINI_API_KEY && !process.env.MOONSHOT_API_KEY) {
-    console.error('❌ 缺少 AI API Key，请设置 OPENAI_API_KEY、GEMINI_API_KEY 或 MOONSHOT_API_KEY');
+  if (!process.env.DEEPSEEK_API_KEY && !process.env.OPENAI_API_KEY && !process.env.GEMINI_API_KEY && !process.env.MOONSHOT_API_KEY) {
+    console.error('❌ 缺少 AI API Key，请设置 DEEPSEEK_API_KEY、OPENAI_API_KEY、GEMINI_API_KEY 或 MOONSHOT_API_KEY');
     process.exit(1);
   }
 

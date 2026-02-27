@@ -310,7 +310,10 @@ async function runAgent(session, userText, progress) {
 
   try {
     console.log('[DEBUG] Calling session.prompt with:', userText.slice(0, 100));
-    await session.prompt(userText);
+    console.log('[DEBUG] session.agent exists:', !!session.agent);
+    console.log('[DEBUG] session.agent.streamFn exists:', !!session.agent?.streamFn);
+    const result = await session.prompt(userText);
+    console.log('[DEBUG] session.prompt result:', JSON.stringify(result, null, 2)?.slice(0, 500));
     console.log('[DEBUG] session.prompt completed, fullResponse length:', fullResponse.length);
     console.log('[DEBUG] fullResponse preview:', fullResponse.slice(0, 200));
   } finally {

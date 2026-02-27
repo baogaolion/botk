@@ -3,7 +3,7 @@
 ## 请在结束回复前运行弹窗命令
 
 在结束回复之前，请运行以下弹窗命令：
-node "C:/Users/Administrator/.niuma-mcp/dialog-trigger.js" --port 13604 "AI想要结束的原因摘要"
+node "C:/Users/Administrator/.niuma-mcp/dialog-trigger.js" --port 13790 "AI想要结束的原因摘要"
 
 ## 输出长度提醒
 
@@ -38,3 +38,8 @@ node "C:/Users/Administrator/.niuma-mcp/dialog-trigger.js" --port 13604 "AI想�
 3. 弹窗确认 - 请在结束前运行弹窗命令
 4. 读取响应文件 - 获取完整用户指令
 5. 执行用户指令 - 按照用户要求执行
+
+## 结束条件
+
+请仅在响应文件中 ACTION 为 end 或 stop 时结束。
+否则请再次运行弹窗命令。

@@ -402,21 +402,25 @@ async function runAgent(session, userText, progress, ctx) {
   const initStreamMsg = async () => {
     if (streamMsgId) return;
     try {
-      // 先发送 typing 动画
-      await ctx.api.sendChatAction(chatId, 'typing');
       const msg = await ctx.reply('💭 思考中...');
       streamMsgId = msg.message_id;
     } catch {}
   };
 
   // 2. 定时发送 typing 动画（保持"正在输入"气泡）
+  // 注意：typing 状态只持续 5 秒，且发送消息后会被清除
+  // 所以我们在每次更新前发送 typing，而不是定时发送
+  const sendTyping = async () => {
+    try {
+      await ctx.api.sendChatAction(chatId, 'typing');
+    } catch {}
+  };
+
   const startTypingTimer = () => {
     if (typingTimer) return;
-    typingTimer = setInterval(async () => {
-      try {
-        await ctx.api.sendChatAction(chatId, 'typing');
-      } catch {}
-    }, TYPING_INTERVAL_MS);
+    // 立即发送一次
+    sendTyping();
+    typingTimer = setInterval(sendTyping, TYPING_INTERVAL_MS);
   };
 
   const stopTypingTimer = () => {
@@ -443,12 +447,11 @@ async function runAgent(session, userText, progress, ctx) {
     
     if (streamMsgId && chatId) {
       try {
-        // 使用 MarkdownV2 格式（需要转义特殊字符）
-        const escapedText = escapeMarkdownV2(displayText);
-        await ctx.api.editMessageText(chatId, streamMsgId, escapedText, { parse_mode: 'MarkdownV2' });
+        // 使用旧版 Markdown（AI 输出的是普通 Markdown，不需要转义）
+        await ctx.api.editMessageText(chatId, streamMsgId, displayText, { parse_mode: 'Markdown' });
       } catch {
         try {
-          // MarkdownV2 失败时回退到纯文本
+          // Markdown 失败时回退到纯文本
           await ctx.api.editMessageText(chatId, streamMsgId, displayText);
         } catch {}
       }
@@ -520,9 +523,11 @@ async function runAgent(session, userText, progress, ctx) {
   });
 
   try {
-    // 初始化流式消息 + 启动定时器
-    await initStreamMsg();
+    // 先启动 typing 动画（用户会看到"正在输入"气泡）
     startTypingTimer();
+    // 然后发送初始消息
+    await initStreamMsg();
+    // 启动定时更新
     startUpdateTimer();
     await session.prompt(userText);
   } finally {

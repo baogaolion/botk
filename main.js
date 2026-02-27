@@ -478,7 +478,7 @@ async function main() {
       `💾 内存: ${Math.round(mem.rss / 1024 / 1024)}MB\n` +
       `🔧 内置工具: read, write, edit, bash\n` +
       `🔌 预置技能: find-skills\n` +
-      `📡 模型: Kimi (Moonshot)\n` +
+      `📡 模型: ${sharedModel}\n` +
       `🔄 活跃会话: ${sessions.size} | 运行中: ${runningTasks.size}\n` +
       `🗄 数据库: ${db.sizeMB}MB (${db.userCount}用户, ${db.taskCount}任务, ${db.fileCount}文件)`,
       { reply_markup: new InlineKeyboard().text('🏠 主菜单', 'main_menu') }
@@ -674,7 +674,7 @@ async function main() {
       `💾 内存: ${Math.round(mem.rss / 1024 / 1024)}MB\n` +
       `🔧 工具: read, write, edit, bash\n` +
       `🔌 技能: find-skills\n` +
-      `📡 模型: Kimi`,
+      `📡 模型: ${sharedModel}`,
       { reply_markup: new InlineKeyboard().text('🏠 主菜单', 'main_menu') }
     );
   });

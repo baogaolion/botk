@@ -288,8 +288,17 @@ async function createPiSession(admin = false) {
     settingsManager: sharedSettingsManager,
   });
   
-  // 设置流式处理函数
-  session.agent.streamFn = streamSimple;
+  // 设置流式处理函数，为 DeepSeek 自定义模型传递 API key
+  if (model.provider === 'deepseek') {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    console.log('[DEBUG] Setting streamFn for DeepSeek with API key:', apiKey ? 'SET' : 'NOT SET');
+    session.agent.streamFn = (m, context) => {
+      console.log('[DEBUG] streamFn called for model:', m.id, 'provider:', m.provider);
+      return streamSimple(m, context, { apiKey });
+    };
+  } else {
+    session.agent.streamFn = streamSimple;
+  }
   
   return session;
 }

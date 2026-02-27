@@ -123,13 +123,19 @@ let sharedAuth, sharedModelRegistry, sharedSettingsManager, sharedLoader, shared
 
 async function initPiGlobals() {
   sharedAuth = new AuthStorage(resolve(AGENT_DIR, 'auth.json'));
+  // 优先使用 Gemini，其次 Kimi
+  if (process.env.GEMINI_API_KEY) {
+    sharedAuth.setRuntimeApiKey('gemini', process.env.GEMINI_API_KEY);
+  }
   if (process.env.MOONSHOT_API_KEY) {
     sharedAuth.setRuntimeApiKey('kimi', process.env.MOONSHOT_API_KEY);
   }
   sharedModelRegistry = new ModelRegistry(sharedAuth, resolve(AGENT_DIR, 'models.json'));
   const available = await sharedModelRegistry.getAvailable();
-  if (!available.length) throw new Error('没有可用的模型，请检查 MOONSHOT_API_KEY 和 models.json');
-  sharedModel = available[0].model;
+  if (!available.length) throw new Error('没有可用的模型，请检查 GEMINI_API_KEY 或 MOONSHOT_API_KEY');
+  // 优先选择 Gemini 模型
+  const geminiModel = available.find(m => m.model.startsWith('gemini'));
+  sharedModel = geminiModel ? geminiModel.model : available[0].model;
 
   sharedSettingsManager = SettingsManager.inMemory({
     compaction: { enabled: false },
@@ -313,7 +319,10 @@ async function sendLongText(ctx, text, keyboard) {
 
 async function main() {
   if (!process.env.BOT_TOKEN) { console.error('❌ 缺少 BOT_TOKEN'); process.exit(1); }
-  if (!process.env.MOONSHOT_API_KEY) { console.error('❌ 缺少 MOONSHOT_API_KEY'); process.exit(1); }
+  if (!process.env.GEMINI_API_KEY && !process.env.MOONSHOT_API_KEY) {
+    console.error('❌ 缺少 AI API Key，请设置 GEMINI_API_KEY 或 MOONSHOT_API_KEY');
+    process.exit(1);
+  }
 
   initDb();
   await initPiGlobals();
@@ -967,7 +976,7 @@ async function main() {
   console.log('🤖 botk 已启动');
   console.log(`🔧 工具: read, write, edit, bash`);
   console.log(`🔌 技能: find-skills`);
-  console.log(`📡 模型: Kimi (Moonshot)`);
+  console.log(`📡 模型: ${sharedModel}`);
   console.log(`🗄 数据库: data/botk.db`);
   if (ADMIN_USER) console.log(`👑 管理员: ${ADMIN_USER}`);
   else console.log('⚠️  未设置 ADMIN_USER');

@@ -3,10 +3,11 @@
   "version": "2.0.0",
   "description": "Telegram AI 助手 - 基于 PI SDK + grammY + Kimi",
   "type": "module",
-  "main": "main.js",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node main.js",
-    "dev": "node --watch main.js"
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "start:legacy": "node main.js"
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.52.10",

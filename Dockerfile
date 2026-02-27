@@ -10,4 +10,4 @@ RUN npm ci --omit=dev
 COPY . .
 RUN mkdir -p uploads data .pi/agent/skills
 
-CMD ["node", "main.js"]
+CMD ["node", "src/index.js"]

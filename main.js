@@ -160,6 +160,13 @@ function getCurrentModel() {
   // 确保索引有效
   if (currentModelIndex >= available.length) currentModelIndex = 0;
   const modelDef = available[currentModelIndex];
+  
+  // 如果是自定义模型（如 DeepSeek），直接返回自定义配置
+  if (modelDef.customModel) {
+    return modelDef.customModel;
+  }
+  
+  // 否则使用 getModel 获取内置模型
   return getModel(modelDef.provider, modelDef.id);
 }
 
@@ -233,7 +240,8 @@ async function createPiSession(admin = false) {
   const model = getCurrentModel();
   if (!model) throw new Error('没有可用的模型');
   
-  const { session } = await createAgentSession({
+  // 为自定义模型（如 DeepSeek）准备 API key
+  const sessionOptions = {
     cwd: process.cwd(),
     agentDir: AGENT_DIR,
     model,
@@ -242,7 +250,14 @@ async function createPiSession(admin = false) {
     resourceLoader: admin ? sharedLoader : sharedUserLoader,
     sessionManager: SessionManager.inMemory(),
     settingsManager: sharedSettingsManager,
-  });
+  };
+  
+  // 如果是 DeepSeek 自定义模型，需要传递 API key
+  if (model.provider === 'deepseek' && process.env.DEEPSEEK_API_KEY) {
+    sessionOptions.apiKey = process.env.DEEPSEEK_API_KEY;
+  }
+  
+  const { session } = await createAgentSession(sessionOptions);
   // 设置流式处理函数（必需）
   session.agent.streamFn = streamSimple;
   return session;
@@ -790,7 +805,7 @@ async function main() {
 
   bot.callbackQuery('main_menu', async (ctx) => {
     await ctx.answerCallbackQuery();
-    await ctx.reply('hi 我是 bao, 有什么需要帮忙的？', { reply_markup: welcomeKb });
+    await ctx.reply('hi 我是 bao, 懒病又犯了吗碧池', { reply_markup: welcomeKb });
   });
 
   bot.callbackQuery('examples', async (ctx) => {

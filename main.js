@@ -278,11 +278,18 @@ async function runAgent(session, userText, progress) {
   let toolName = '';
 
   const unsub = session.subscribe((event) => {
+    // 调试：打印所有事件类型
+    console.log('[DEBUG] Event type:', event.type);
+    if (event.type === 'error') {
+      console.error('[DEBUG] Error event:', event.error);
+    }
     if (event.type !== 'message_update') return;
     const e = event.assistantMessageEvent;
+    console.log('[DEBUG] assistantMessageEvent type:', e.type);
     switch (e.type) {
       case 'text_delta':
         fullResponse += e.delta;
+        console.log('[DEBUG] text_delta received, length:', e.delta?.length);
         break;
       case 'tool_call_start':
         toolName = e.name || 'tool';

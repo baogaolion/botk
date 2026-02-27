@@ -352,14 +352,46 @@ function evictSessions() {
 
 // ==================== Agent 执行 ====================
 
-async function runAgent(session, userText, progress) {
+async function runAgent(session, userText, progress, ctx) {
   let fullResponse = '';
   let toolName = '';
   let lastError = null;
+  
+  // 流式输出状态
+  let streamMsgId = null;
+  let lastStreamUpdate = 0;
+  const STREAM_THROTTLE_MS = 800; // 流式更新节流间隔
+  const chatId = ctx.chat?.id;
+
+  // 初始化流式消息
+  const initStreamMsg = async () => {
+    if (streamMsgId) return;
+    try {
+      const msg = await ctx.reply('💭 思考中...', { parse_mode: 'Markdown' });
+      streamMsgId = msg.message_id;
+    } catch {}
+  };
+
+  // 更新流式消息（带节流）
+  const updateStreamMsg = async (text) => {
+    if (!streamMsgId || !chatId) return;
+    const now = Date.now();
+    if (now - lastStreamUpdate < STREAM_THROTTLE_MS) return;
+    lastStreamUpdate = now;
+    
+    // 截断过长文本，保留最后部分
+    let displayText = text;
+    if (text.length > TG_MAX_LEN - 100) {
+      displayText = '...\n\n' + text.slice(-(TG_MAX_LEN - 100));
+    }
+    displayText += ' ▌'; // 添加光标效果
+    
+    try {
+      await ctx.api.editMessageText(chatId, streamMsgId, displayText);
+    } catch {}
+  };
 
   const unsub = session.subscribe((event) => {
-    // 调试：打印所有事件
-    console.log('[DEBUG] Event type:', event.type);
     // 捕获 message_end 中的错误
     if (event.type === 'message_end' && event.message?.errorMessage) {
       console.error('[DEBUG] message_end error:', event.message.errorMessage);
@@ -378,7 +410,6 @@ async function runAgent(session, userText, progress) {
     }
     if (event.type === 'auto_retry_start') {
       console.error('[DEBUG] Auto retry:', JSON.stringify(event, null, 2));
-      // 解析错误信息
       try {
         const errData = JSON.parse(event.errorMessage || '{}');
         const innerErr = JSON.parse(errData.error?.message || '{}');
@@ -395,11 +426,11 @@ async function runAgent(session, userText, progress) {
     }
     if (event.type !== 'message_update') return;
     const e = event.assistantMessageEvent;
-    console.log('[DEBUG] assistantMessageEvent type:', e.type);
     switch (e.type) {
       case 'text_delta':
         fullResponse += e.delta;
-        console.log('[DEBUG] text_delta received, length:', e.delta?.length);
+        // 流式更新消息
+        updateStreamMsg(fullResponse);
         break;
       case 'tool_call_start':
         toolName = e.name || 'tool';
@@ -419,23 +450,37 @@ async function runAgent(session, userText, progress) {
   });
 
   try {
-    console.log('[DEBUG] Calling session.prompt with:', userText.slice(0, 100));
-    console.log('[DEBUG] session.agent exists:', !!session.agent);
-    console.log('[DEBUG] session.agent.streamFn exists:', !!session.agent?.streamFn);
+    await initStreamMsg();
     await session.prompt(userText);
-    console.log('[DEBUG] session.prompt completed, fullResponse length:', fullResponse.length);
   } finally {
     unsub();
   }
 
   // 如果有错误且没有响应，抛出错误
   if (lastError && !fullResponse.trim()) {
+    // 删除流式消息
+    if (streamMsgId && chatId) {
+      try { await ctx.api.deleteMessage(chatId, streamMsgId); } catch {}
+    }
     const err = new Error(lastError.message || 'AI 请求失败');
     err.status = lastError.status;
     throw err;
   }
 
-  return fullResponse;
+  // 最终更新：移除光标，显示完整内容
+  if (streamMsgId && chatId && fullResponse.trim()) {
+    try {
+      // 如果内容太长，删除流式消息，改用 sendLongText
+      if (fullResponse.length > TG_MAX_LEN) {
+        await ctx.api.deleteMessage(chatId, streamMsgId);
+        return { response: fullResponse, streamMsgId: null };
+      }
+      await ctx.api.editMessageText(chatId, streamMsgId, fullResponse);
+      return { response: fullResponse, streamMsgId };
+    } catch {}
+  }
+
+  return { response: fullResponse, streamMsgId };
 }
 
 // ==================== 分段发送 (支持 Markdown) ====================
@@ -1025,7 +1070,7 @@ async function main() {
       }
 
       await progress.update('💭 思考中...', 25);
-      const response = await runAgent(session, userText, progress);
+      const result = await runAgent(session, userText, progress, ctx);
       const duration = Date.now() - startTime;
       const durationStr = duration > 60000
         ? `${(duration / 60000).toFixed(1)}分钟`
@@ -1036,9 +1081,17 @@ async function main() {
         .text('🗑 清除对话', 'clear_session')
         .text('🏠 主菜单', 'main_menu');
 
-      if (response && response.trim()) {
+      // 流式输出已经显示在 streamMsgId 消息中
+      if (result.streamMsgId) {
+        // 流式消息已显示完整内容，只需添加按钮
+        try {
+          await ctx.api.editMessageReplyMarkup(chatId, result.streamMsgId, { reply_markup: doneKb });
+        } catch {}
         await progress.finish(`✅ 完成 (${durationStr})`);
-        await sendLongText(ctx, response, doneKb);
+      } else if (result.response && result.response.trim()) {
+        // 内容太长，需要分段发送
+        await progress.finish(`✅ 完成 (${durationStr})`);
+        await sendLongText(ctx, result.response, doneKb);
       } else {
         await progress.finish(`✅ 完成 (${durationStr})`);
       }

@@ -379,24 +379,37 @@ async function runAgent(session, userText, progress, ctx) {
   // 流式输出状态
   let streamMsgId = null;
   let lastStreamUpdate = 0;
-  const STREAM_THROTTLE_MS = 800; // 流式更新节流间隔
+  let lastDisplayedLen = 0;
+  let updatePending = false;
+  const STREAM_THROTTLE_MS = 300; // 流式更新节流间隔（更快）
+  const MIN_CHARS_TO_UPDATE = 10; // 最少累积字符数才更新
   const chatId = ctx.chat?.id;
 
   // 初始化流式消息
   const initStreamMsg = async () => {
     if (streamMsgId) return;
     try {
-      const msg = await ctx.reply('💭 思考中...', { parse_mode: 'Markdown' });
+      const msg = await ctx.reply('💭 ...', { parse_mode: 'Markdown' });
       streamMsgId = msg.message_id;
     } catch {}
   };
 
-  // 更新流式消息（带节流）
-  const updateStreamMsg = async (text) => {
+  // 更新流式消息（带节流和字符缓冲）
+  const updateStreamMsg = async (text, force = false) => {
     if (!streamMsgId || !chatId) return;
+    if (updatePending) return; // 防止并发更新
+    
     const now = Date.now();
-    if (now - lastStreamUpdate < STREAM_THROTTLE_MS) return;
+    const newChars = text.length - lastDisplayedLen;
+    
+    // 节流：时间不够 且 字符不够 且 不是强制更新
+    if (!force && now - lastStreamUpdate < STREAM_THROTTLE_MS && newChars < MIN_CHARS_TO_UPDATE) {
+      return;
+    }
+    
+    updatePending = true;
     lastStreamUpdate = now;
+    lastDisplayedLen = text.length;
     
     // 截断过长文本，保留最后部分
     let displayText = text;
@@ -413,6 +426,7 @@ async function runAgent(session, userText, progress, ctx) {
         await ctx.api.editMessageText(chatId, streamMsgId, displayText);
       } catch {}
     }
+    updatePending = false;
   };
 
   const unsub = session.subscribe((event) => {

@@ -388,54 +388,45 @@ async function runAgent(session, userText, progress, ctx) {
   let toolName = '';
   let lastError = null;
   
-  // 流式输出状态
+  // 流式输出状态（优化版 editMessageText 方案）
   let streamMsgId = null;
-  let draftId = null;
-  let useDraft = false;
   let lastDisplayedText = '';
   let updateTimer = null;
+  let typingTimer = null;
   let isUpdating = false;
-  const STREAM_INTERVAL_MS = 150; // 使用 draft 时可以更快
-  const EDIT_INTERVAL_MS = 500;   // 使用 edit 时需要慢一点
+  const THROTTLE_MS = 450; // 节流间隔：450ms（最佳平衡点）
+  const TYPING_INTERVAL_MS = 4000; // typing 动画间隔
   const chatId = ctx.chat?.id;
 
-  // 尝试使用 sendMessageDraft（更平滑）
-  const tryInitDraft = async () => {
-    if (draftId || !chatId) return false;
-    try {
-      // 生成唯一的 draft_id
-      draftId = Date.now() % 2147483647 || 1; // 确保非零
-      // message_thread_id: 1 是私聊中的默认主题
-      await ctx.api.sendMessageDraft(chatId, draftId, '💭 ...', {
-        parse_mode: 'MarkdownV2',
-        message_thread_id: 1
-      });
-      useDraft = true;
-      return true;
-    } catch (err) {
-      // sendMessageDraft 不支持，回退到普通消息
-      console.log('[Stream] sendMessageDraft not supported, falling back to editMessageText');
-      draftId = null;
-      useDraft = false;
-      return false;
-    }
-  };
-
-  // 初始化流式消息（回退方案）
+  // 1. 先发一条初始消息
   const initStreamMsg = async () => {
-    if (streamMsgId || useDraft) return;
+    if (streamMsgId) return;
     try {
-      const msg = await ctx.reply('💭 \\.\\.\\.', { parse_mode: 'MarkdownV2' });
+      // 先发送 typing 动画
+      await ctx.api.sendChatAction(chatId, 'typing');
+      const msg = await ctx.reply('💭 思考中...');
       streamMsgId = msg.message_id;
-    } catch {
+    } catch {}
+  };
+
+  // 2. 定时发送 typing 动画（保持"正在输入"气泡）
+  const startTypingTimer = () => {
+    if (typingTimer) return;
+    typingTimer = setInterval(async () => {
       try {
-        const msg = await ctx.reply('💭 ...');
-        streamMsgId = msg.message_id;
+        await ctx.api.sendChatAction(chatId, 'typing');
       } catch {}
+    }, TYPING_INTERVAL_MS);
+  };
+
+  const stopTypingTimer = () => {
+    if (typingTimer) {
+      clearInterval(typingTimer);
+      typingTimer = null;
     }
   };
 
-  // 执行一次更新
+  // 3. 智能节流更新（核心优化）
   const doUpdate = async () => {
     if (isUpdating) return;
     if (fullResponse === lastDisplayedText) return; // 无变化
@@ -448,26 +439,16 @@ async function runAgent(session, userText, progress, ctx) {
     if (fullResponse.length > TG_MAX_LEN - 100) {
       displayText = '...\n\n' + fullResponse.slice(-(TG_MAX_LEN - 100));
     }
-    displayText += ' ▌'; // 添加光标效果
+    displayText += ' ▌'; // 添加光标效果（打字机风格）
     
-    try {
-      if (useDraft && draftId) {
-        // 使用 sendMessageDraft 更新（更平滑）
-        // MarkdownV2 需要转义特殊字符
-        const escapedText = escapeMarkdownV2(displayText);
-        await ctx.api.sendMessageDraft(chatId, draftId, escapedText, {
-          parse_mode: 'MarkdownV2',
-          message_thread_id: 1
-        });
-      } else if (streamMsgId && chatId) {
-        // 回退到 editMessageText（也支持 MarkdownV2）
+    if (streamMsgId && chatId) {
+      try {
+        // 使用 MarkdownV2 格式（需要转义特殊字符）
         const escapedText = escapeMarkdownV2(displayText);
         await ctx.api.editMessageText(chatId, streamMsgId, escapedText, { parse_mode: 'MarkdownV2' });
-      }
-    } catch {
-      if (!useDraft && streamMsgId && chatId) {
+      } catch {
         try {
-          // 如果 MarkdownV2 失败，尝试纯文本
+          // MarkdownV2 失败时回退到纯文本
           await ctx.api.editMessageText(chatId, streamMsgId, displayText);
         } catch {}
       }
@@ -475,11 +456,10 @@ async function runAgent(session, userText, progress, ctx) {
     isUpdating = false;
   };
 
-  // 启动定时更新
+  // 启动定时更新（450ms 节流）
   const startUpdateTimer = () => {
     if (updateTimer) return;
-    const interval = useDraft ? STREAM_INTERVAL_MS : EDIT_INTERVAL_MS;
-    updateTimer = setInterval(doUpdate, interval);
+    updateTimer = setInterval(doUpdate, THROTTLE_MS);
   };
 
   // 停止定时更新
@@ -540,15 +520,14 @@ async function runAgent(session, userText, progress, ctx) {
   });
 
   try {
-    // 先尝试 sendMessageDraft（更平滑），失败则回退
-    const draftOk = await tryInitDraft();
-    if (!draftOk) {
-      await initStreamMsg();
-    }
+    // 初始化流式消息 + 启动定时器
+    await initStreamMsg();
+    startTypingTimer();
     startUpdateTimer();
     await session.prompt(userText);
   } finally {
     stopUpdateTimer();
+    stopTypingTimer();
     unsub();
     // 最后一次更新确保显示完整内容
     await doUpdate();
@@ -566,20 +545,6 @@ async function runAgent(session, userText, progress, ctx) {
   }
 
   // 最终更新：移除光标，显示完整内容
-  // 如果使用 draft，需要发送最终消息
-  if (useDraft && fullResponse.trim()) {
-    try {
-      // draft 模式：发送最终消息
-      const finalMsg = await ctx.reply(fullResponse, { parse_mode: 'Markdown' });
-      return { response: fullResponse, streamMsgId: finalMsg.message_id };
-    } catch {
-      try {
-        const finalMsg = await ctx.reply(fullResponse);
-        return { response: fullResponse, streamMsgId: finalMsg.message_id };
-      } catch {}
-    }
-  }
-  
   if (streamMsgId && chatId && fullResponse.trim()) {
     try {
       // 如果内容太长，删除流式消息，改用 sendLongText

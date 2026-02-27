@@ -220,7 +220,7 @@ async function initPiGlobals() {
   if (!available.length) throw new Error('没有可用的模型，请检查 GEMINI_API_KEY 或 MOONSHOT_API_KEY');
   
   // 初始化 AuthStorage 并设置 API keys
-  sharedAuth = AuthStorage.inMemory();
+  sharedAuth = AuthStorage.create(resolve(AGENT_DIR, 'auth.json'));
   if (process.env.DEEPSEEK_API_KEY) {
     sharedAuth.setRuntimeApiKey('deepseek', process.env.DEEPSEEK_API_KEY);
     console.log('[DEBUG] DeepSeek API key set in AuthStorage');

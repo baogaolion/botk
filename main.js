@@ -124,8 +124,9 @@ let sharedAuth, sharedModelRegistry, sharedSettingsManager, sharedLoader, shared
 async function initPiGlobals() {
   sharedAuth = new AuthStorage(resolve(AGENT_DIR, 'auth.json'));
   // 优先使用 Gemini，其次 Kimi
+  // 注意：PI SDK 使用 'google' 作为 Gemini 的 provider 名称
   if (process.env.GEMINI_API_KEY) {
-    sharedAuth.setRuntimeApiKey('gemini', process.env.GEMINI_API_KEY);
+    sharedAuth.setRuntimeApiKey('google', process.env.GEMINI_API_KEY);
   }
   if (process.env.MOONSHOT_API_KEY) {
     sharedAuth.setRuntimeApiKey('kimi', process.env.MOONSHOT_API_KEY);

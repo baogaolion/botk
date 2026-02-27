@@ -278,10 +278,19 @@ async function runAgent(session, userText, progress) {
   let toolName = '';
 
   const unsub = session.subscribe((event) => {
-    // 调试：打印所有事件类型
+    // 调试：打印所有事件类型和详细信息
     console.log('[DEBUG] Event type:', event.type);
     if (event.type === 'error') {
-      console.error('[DEBUG] Error event:', event.error);
+      console.error('[DEBUG] Error event:', JSON.stringify(event, null, 2));
+    }
+    if (event.type === 'auto_retry_start') {
+      console.error('[DEBUG] Auto retry:', JSON.stringify(event, null, 2));
+    }
+    if (event.type === 'message_start') {
+      console.log('[DEBUG] message_start:', JSON.stringify(event.message?.role || event, null, 2));
+    }
+    if (event.type === 'message_end') {
+      console.log('[DEBUG] message_end content:', JSON.stringify(event.message?.content?.slice(0, 200) || event, null, 2));
     }
     if (event.type !== 'message_update') return;
     const e = event.assistantMessageEvent;

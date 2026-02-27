@@ -31,6 +31,9 @@ const SESSION_MAX = 20;
 const PG_CONNECTION_STRING = process.env.PG_CONNECTION_STRING || '';
 const PG_POLL_INTERVAL = Number(process.env.PG_POLL_INTERVAL) || 30000;
 
+// 用户文档目录（用于文件分析和上传保存）
+const USER_DOCS_DIR = process.env.USER_DOCS_DIR || '/home/administrator/Documents';
+
 // ==================== 可用模型配置 ====================
 // 定义支持的模型列表，根据环境变量中的 API Key 动态启用
 // 顺序决定默认优先级：DeepSeek > OpenAI > Gemini > Kimi
@@ -241,25 +244,41 @@ async function initPiGlobals() {
   const ADMIN_PROMPT = [
     '你是 bao，一个万能私人助手。用中文回复。',
     `当前工作目录: ${process.cwd()}`,
+    `用户文档目录: ${USER_DOCS_DIR}`,
     '你拥有服务器完整权限：可以通过 bash 执行任意命令、读写编辑任何文件、访问网络（curl/wget）。',
+    '',
+    '## 文件操作规则',
+    `- 当用户要求分析、查找、搜索文件时，默认在用户文档目录 ${USER_DOCS_DIR} 下操作`,
+    '- 当用户上传任何文件（图片、文档、音频等）时，询问用户是否要保存到文档目录',
+    '- 如果用户确认保存，将文件保存到文档目录并告知保存路径',
+    '',
+    '## 技能扩展',
     '当用户的需求超出你当前能力时，使用 find-skills 技能搜索并安装新技能。',
     '步骤：1. 用 bash 执行 npx skills find "关键词" 搜索',
     '2. 找到后执行 npx skills add <package> -g -y 安装',
     '3. 安装后使用新技能完成任务',
     '如果搜索不到技能，就用 bash 和其他基础工具直接完成。',
+    '',
     '保持简洁、有用、接地气。不要说废话。',
   ].join('\n');
 
   const USER_PROMPT = [
     '你是 bao，一个万能私人助手。用中文回复。',
     `当前工作目录: ${process.cwd()}`,
+    `用户文档目录: ${USER_DOCS_DIR}`,
     '你可以帮用户完成各种任务：回答问题、翻译、总结、数据分析、写作等。',
-    '你有以下权限：',
+    '',
+    '## 权限',
     '  - 可以用 bash 执行只读命令：ls, cat, head, tail, grep, find, wc, curl, wget, df, du, date, whoami, uname, ps, top',
     '  - 可以用 read 工具读取文件',
     '  - 禁止执行任何写入、修改、删除操作（write, edit, rm, mv, cp, mkdir, chmod, chown, apt, npm install 等）',
     '  - 禁止执行 sudo、shutdown、reboot、kill、pkill 等危险命令',
     '  - 如果用户要求你做禁止的操作，礼貌地告知权限不足，建议联系管理员',
+    '',
+    '## 文件操作规则',
+    `- 当用户要求分析、查找、搜索文件时，默认在用户文档目录 ${USER_DOCS_DIR} 下操作`,
+    '- 当用户上传任何文件时，告知用户你可以分析该文件，但无法保存（需要管理员权限）',
+    '',
     '当用户的需求超出你当前能力时，使用 find-skills 技能搜索并安装新技能。',
     '保持简洁、有用、接地气。不要说废话。',
   ].join('\n');
@@ -387,8 +406,13 @@ async function runAgent(session, userText, progress, ctx) {
     displayText += ' ▌'; // 添加光标效果
     
     try {
-      await ctx.api.editMessageText(chatId, streamMsgId, displayText);
-    } catch {}
+      await ctx.api.editMessageText(chatId, streamMsgId, displayText, { parse_mode: 'Markdown' });
+    } catch {
+      // Markdown 解析失败时回退到纯文本
+      try {
+        await ctx.api.editMessageText(chatId, streamMsgId, displayText);
+      } catch {}
+    }
   };
 
   const unsub = session.subscribe((event) => {
@@ -1060,40 +1084,38 @@ async function main() {
     }, TIMEOUT_MS);
 
     try {
-      await progress.init('🔄 正在处理你的请求...');
-
       let session = getSession(key);
       if (!session) {
-        await progress.update('🧠 初始化 AI...', 15);
         session = await createPiSession(isAdmin(ctx));
         setSession(key, session);
       }
 
-      await progress.update('💭 思考中...', 25);
       const result = await runAgent(session, userText, progress, ctx);
       const duration = Date.now() - startTime;
       const durationStr = duration > 60000
         ? `${(duration / 60000).toFixed(1)}分钟`
         : `${(duration / 1000).toFixed(1)}秒`;
 
-      progress.phase = 100;
       const doneKb = new InlineKeyboard()
         .text('🗑 清除对话', 'clear_session')
         .text('🏠 主菜单', 'main_menu');
 
       // 流式输出已经显示在 streamMsgId 消息中
       if (result.streamMsgId) {
-        // 流式消息已显示完整内容，只需添加按钮
+        // 在流式消息末尾添加耗时和按钮
         try {
-          await ctx.api.editMessageReplyMarkup(chatId, result.streamMsgId, { reply_markup: doneKb });
-        } catch {}
-        await progress.finish(`✅ 完成 (${durationStr})`);
+          const finalText = result.response + `\n\n⏱ ${durationStr}`;
+          await ctx.api.editMessageText(chatId, result.streamMsgId, finalText, { reply_markup: doneKb, parse_mode: 'Markdown' });
+        } catch {
+          // Markdown 解析失败时回退到纯文本
+          try {
+            const finalText = result.response + `\n\n⏱ ${durationStr}`;
+            await ctx.api.editMessageText(chatId, result.streamMsgId, finalText, { reply_markup: doneKb });
+          } catch {}
+        }
       } else if (result.response && result.response.trim()) {
         // 内容太长，需要分段发送
-        await progress.finish(`✅ 完成 (${durationStr})`);
-        await sendLongText(ctx, result.response, doneKb);
-      } else {
-        await progress.finish(`✅ 完成 (${durationStr})`);
+        await sendLongText(ctx, result.response + `\n\n⏱ ${durationStr}`, doneKb);
       }
 
       taskRepo.add(ctx.from.id, userText, duration, 'ok');

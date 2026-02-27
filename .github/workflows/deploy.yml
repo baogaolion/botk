@@ -1,0 +1,145 @@
+name: Deploy Botk
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=botk
+          cache-to: type=gha,mode=max,scope=botk
+          platforms: linux/amd64
+
+      - name: Sync docker-compose.yml to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.BOTK_HOST }}
+          username: ${{ secrets.BOTK_SSH_USER }}
+          key: ${{ secrets.BOTK_SSH_KEY }}
+          port: 22
+          source: "docker-compose.yml"
+          target: "${{ secrets.BOTK_DEPLOY_PATH || '/opt/botk' }}"
+          overwrite: true
+
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.BOTK_HOST }}
+          username: ${{ secrets.BOTK_SSH_USER }}
+          key: ${{ secrets.BOTK_SSH_KEY }}
+          port: 22
+          command_timeout: 10m
+          script: |
+            set -e
+            echo "=== 开始部署 Botk ==="
+            
+            # 1. 登录镜像仓库
+            echo "[1/5] 登录 GHCR..."
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+            
+            # 2. 进入项目目录
+            echo "[2/5] 进入项目目录..."
+            cd ${{ secrets.BOTK_DEPLOY_PATH || '/opt/botk' }}
+            
+            # 修复 SCP 子目录问题
+            if [ -f docker-compose.yml/docker-compose.yml ]; then
+              mv docker-compose.yml/docker-compose.yml docker-compose.yml.new
+              rm -rf docker-compose.yml
+              mv docker-compose.yml.new docker-compose.yml
+            fi
+            
+            # 3. 拉取最新镜像
+            echo "[3/5] 拉取最新镜像..."
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            
+            # 4. 停止旧容器并启动新容器
+            echo "[4/5] 重启服务..."
+            docker compose down || true
+            docker compose up -d
+            
+            # 5. 清理旧镜像
+            echo "[5/5] 清理旧镜像..."
+            docker image prune -af --filter "until=168h" || true
+            
+            echo "=== ✅ Botk 部署完成 ==="
+
+      - name: Health Check
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.BOTK_HOST }}
+          username: ${{ secrets.BOTK_SSH_USER }}
+          key: ${{ secrets.BOTK_SSH_KEY }}
+          port: 22
+          command_timeout: 2m
+          script: |
+            set -e
+            echo "=== 健康检查 ==="
+            
+            # 检查容器是否运行
+            echo "[1/2] 检查容器状态..."
+            for i in {1..12}; do
+              if docker ps | grep -q botk; then
+                echo "✅ 容器运行中"
+                break
+              fi
+              if [ "$i" = "12" ]; then
+                echo "❌ 容器未启动"
+                docker compose -f ${{ secrets.BOTK_DEPLOY_PATH || '/opt/botk' }}/docker-compose.yml logs --tail 30
+                exit 1
+              fi
+              echo "等待容器启动... ($i/12)"
+              sleep 5
+            done
+            
+            # 检查日志是否有启动成功标志
+            echo "[2/2] 检查启动日志..."
+            sleep 5
+            if docker logs botk 2>&1 | grep -q "botk 已启动"; then
+              echo "✅ Bot 启动成功"
+            else
+              echo "⚠️ 未检测到启动日志，输出最近日志："
+              docker logs botk --tail 20
+            fi
+            
+            echo "=== ✅ 健康检查完成 ==="

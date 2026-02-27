@@ -1,0 +1,35 @@
+{
+  "providers": {
+    "kimi": {
+      "baseUrl": "https://api.moonshot.cn/v1",
+      "api": "openai-completions",
+      "apiKey": "MOONSHOT_API_KEY",
+      "models": [
+        {
+          "id": "moonshot-v1-8k",
+          "name": "Kimi 8K",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 8192,
+          "maxTokens": 4096
+        },
+        {
+          "id": "moonshot-v1-32k",
+          "name": "Kimi 32K",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 32768,
+          "maxTokens": 16384
+        },
+        {
+          "id": "moonshot-v1-128k",
+          "name": "Kimi 128K",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 131072,
+          "maxTokens": 65536
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,10 @@
+services:
+  botk:
+    image: ghcr.io/${GITHUB_REPOSITORY:-baogaolion/botk}:latest
+    container_name: botk
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./uploads:/app/uploads
+      - ./data:/app/data
+      - ./.pi:/app/.pi

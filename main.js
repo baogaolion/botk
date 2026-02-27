@@ -658,7 +658,9 @@ async function main() {
     .text('⚙️ 系统状态', 'cb_status')
     .row()
     .text('📚 已装技能', 'skills_list')
-    .text('❓ 帮助', 'cb_help');
+    .text('❓ 帮助', 'cb_help')
+    .row()
+    .text('📬 客户咨询', 'submissions_menu');
 
   bot.command('start', async (ctx) => {
     if (!isAllowed(ctx)) { await ctx.reply('⛔ 无权限。\n你的 ID: ' + ctx.from.id); return; }
@@ -1011,6 +1013,14 @@ async function main() {
   // 返回咨询菜单
   bot.callbackQuery('submissions_menu', async (ctx) => {
     await ctx.answerCallbackQuery();
+    if (!isAdmin(ctx)) {
+      await ctx.reply('⚠️ 仅管理员可查看客户咨询。');
+      return;
+    }
+    if (!pgPool) {
+      await ctx.reply('⚠️ 未配置 PostgreSQL 数据库。');
+      return;
+    }
     await ctx.editMessageText('📬 客户咨询管理', {
       reply_markup: new InlineKeyboard()
         .text('🟡 处理中', 'submissions_processing_0')

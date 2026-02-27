@@ -384,15 +384,36 @@ async function runAgent(session, userText, progress, ctx) {
   
   // 流式输出状态
   let streamMsgId = null;
+  let draftId = null;
+  let useDraft = false;
   let lastDisplayedText = '';
   let updateTimer = null;
   let isUpdating = false;
-  const STREAM_INTERVAL_MS = 500; // 定时更新间隔
+  const STREAM_INTERVAL_MS = 150; // 使用 draft 时可以更快
+  const EDIT_INTERVAL_MS = 500;   // 使用 edit 时需要慢一点
   const chatId = ctx.chat?.id;
 
-  // 初始化流式消息
+  // 尝试使用 sendMessageDraft（更平滑）
+  const tryInitDraft = async () => {
+    if (draftId || !chatId) return false;
+    try {
+      // 生成唯一的 draft_id
+      draftId = Date.now() % 2147483647 || 1; // 确保非零
+      await ctx.api.sendMessageDraft(chatId, draftId, '💭 ...');
+      useDraft = true;
+      return true;
+    } catch (err) {
+      // sendMessageDraft 不支持，回退到普通消息
+      console.log('[Stream] sendMessageDraft not supported, falling back to editMessageText');
+      draftId = null;
+      useDraft = false;
+      return false;
+    }
+  };
+
+  // 初始化流式消息（回退方案）
   const initStreamMsg = async () => {
-    if (streamMsgId) return;
+    if (streamMsgId || useDraft) return;
     try {
       const msg = await ctx.reply('💭 ...', { parse_mode: 'Markdown' });
       streamMsgId = msg.message_id;
@@ -401,7 +422,7 @@ async function runAgent(session, userText, progress, ctx) {
 
   // 执行一次更新
   const doUpdate = async () => {
-    if (!streamMsgId || !chatId || isUpdating) return;
+    if (isUpdating) return;
     if (fullResponse === lastDisplayedText) return; // 无变化
     
     isUpdating = true;
@@ -415,11 +436,19 @@ async function runAgent(session, userText, progress, ctx) {
     displayText += ' ▌'; // 添加光标效果
     
     try {
-      await ctx.api.editMessageText(chatId, streamMsgId, displayText, { parse_mode: 'Markdown' });
+      if (useDraft && draftId) {
+        // 使用 sendMessageDraft 更新（更平滑）
+        await ctx.api.sendMessageDraft(chatId, draftId, displayText);
+      } else if (streamMsgId && chatId) {
+        // 回退到 editMessageText
+        await ctx.api.editMessageText(chatId, streamMsgId, displayText, { parse_mode: 'Markdown' });
+      }
     } catch {
-      try {
-        await ctx.api.editMessageText(chatId, streamMsgId, displayText);
-      } catch {}
+      if (!useDraft && streamMsgId && chatId) {
+        try {
+          await ctx.api.editMessageText(chatId, streamMsgId, displayText);
+        } catch {}
+      }
     }
     isUpdating = false;
   };
@@ -427,7 +456,8 @@ async function runAgent(session, userText, progress, ctx) {
   // 启动定时更新
   const startUpdateTimer = () => {
     if (updateTimer) return;
-    updateTimer = setInterval(doUpdate, STREAM_INTERVAL_MS);
+    const interval = useDraft ? STREAM_INTERVAL_MS : EDIT_INTERVAL_MS;
+    updateTimer = setInterval(doUpdate, interval);
   };
 
   // 停止定时更新
@@ -488,7 +518,11 @@ async function runAgent(session, userText, progress, ctx) {
   });
 
   try {
-    await initStreamMsg();
+    // 先尝试 sendMessageDraft（更平滑），失败则回退
+    const draftOk = await tryInitDraft();
+    if (!draftOk) {
+      await initStreamMsg();
+    }
     startUpdateTimer();
     await session.prompt(userText);
   } finally {
@@ -510,6 +544,20 @@ async function runAgent(session, userText, progress, ctx) {
   }
 
   // 最终更新：移除光标，显示完整内容
+  // 如果使用 draft，需要发送最终消息
+  if (useDraft && fullResponse.trim()) {
+    try {
+      // draft 模式：发送最终消息
+      const finalMsg = await ctx.reply(fullResponse, { parse_mode: 'Markdown' });
+      return { response: fullResponse, streamMsgId: finalMsg.message_id };
+    } catch {
+      try {
+        const finalMsg = await ctx.reply(fullResponse);
+        return { response: fullResponse, streamMsgId: finalMsg.message_id };
+      } catch {}
+    }
+  }
+  
   if (streamMsgId && chatId && fullResponse.trim()) {
     try {
       // 如果内容太长，删除流式消息，改用 sendLongText

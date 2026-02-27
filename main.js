@@ -34,9 +34,44 @@ const PG_POLL_INTERVAL = Number(process.env.PG_POLL_INTERVAL) || 30000;
 // ==================== 可用模型配置 ====================
 // 定义支持的模型列表，根据环境变量中的 API Key 动态启用
 // 顺序决定默认优先级：DeepSeek > OpenAI > Gemini > Kimi
+// DeepSeek 使用自定义模型配置（OpenAI 兼容）
 const MODEL_DEFINITIONS = [
-  { provider: 'deepseek', id: 'deepseek-chat', name: 'DeepSeek Chat', envKey: 'DEEPSEEK_API_KEY' },
-  { provider: 'deepseek', id: 'deepseek-reasoner', name: 'DeepSeek R1', envKey: 'DEEPSEEK_API_KEY' },
+  { 
+    provider: 'deepseek', 
+    id: 'deepseek-chat', 
+    name: 'DeepSeek Chat', 
+    envKey: 'DEEPSEEK_API_KEY',
+    customModel: {
+      id: 'deepseek-chat',
+      name: 'DeepSeek Chat',
+      api: 'openai-completions',
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      reasoning: false,
+      input: ['text'],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 64000,
+      maxTokens: 8192,
+    }
+  },
+  { 
+    provider: 'deepseek', 
+    id: 'deepseek-reasoner', 
+    name: 'DeepSeek R1', 
+    envKey: 'DEEPSEEK_API_KEY',
+    customModel: {
+      id: 'deepseek-reasoner',
+      name: 'DeepSeek R1',
+      api: 'openai-completions',
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      reasoning: true,
+      input: ['text'],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 64000,
+      maxTokens: 8192,
+    }
+  },
   { provider: 'openai', id: 'gpt-4o', name: 'GPT-4o', envKey: 'OPENAI_API_KEY' },
   { provider: 'openai', id: 'gpt-4o-mini', name: 'GPT-4o Mini', envKey: 'OPENAI_API_KEY' },
   { provider: 'openai', id: 'gpt-4-turbo', name: 'GPT-4 Turbo', envKey: 'OPENAI_API_KEY' },

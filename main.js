@@ -247,8 +247,11 @@ async function initPiGlobals() {
     `用户文档目录: ${USER_DOCS_DIR}`,
     '你拥有服务器完整权限：可以通过 bash 执行任意命令、读写编辑任何文件、访问网络（curl/wget）。',
     '',
-    '## 文件操作规则',
-    `- 当用户要求分析、查找、搜索文件时，默认在用户文档目录 ${USER_DOCS_DIR} 下操作`,
+    '## 文件操作规则（重要）',
+    `- **文件分析范围限制**：只能在以下位置分析文件：`,
+    `  1. 用户文档目录: ${USER_DOCS_DIR}`,
+    `  2. 用户上传的文件（临时目录 /app/uploads）`,
+    `- **禁止扫描其他目录**：不要扫描 /home、/etc、/var 等系统目录`,
     '- 当用户上传任何文件（图片、文档、音频等）时，询问用户是否要保存到文档目录',
     '- 如果用户确认保存，将文件保存到文档目录并告知保存路径',
     '',
@@ -275,8 +278,11 @@ async function initPiGlobals() {
     '  - 禁止执行 sudo、shutdown、reboot、kill、pkill 等危险命令',
     '  - 如果用户要求你做禁止的操作，礼貌地告知权限不足，建议联系管理员',
     '',
-    '## 文件操作规则',
-    `- 当用户要求分析、查找、搜索文件时，默认在用户文档目录 ${USER_DOCS_DIR} 下操作`,
+    '## 文件操作规则（重要）',
+    `- **文件分析范围限制**：只能在以下位置分析文件：`,
+    `  1. 用户文档目录: ${USER_DOCS_DIR}`,
+    `  2. 用户上传的文件`,
+    `- **禁止扫描其他目录**：不要扫描 /home、/etc、/var 等系统目录`,
     '- 当用户上传任何文件时，告知用户你可以分析该文件，但无法保存（需要管理员权限）',
     '',
     '当用户的需求超出你当前能力时，使用 find-skills 技能搜索并安装新技能。',
@@ -378,11 +384,10 @@ async function runAgent(session, userText, progress, ctx) {
   
   // 流式输出状态
   let streamMsgId = null;
-  let lastStreamUpdate = 0;
-  let lastDisplayedLen = 0;
-  let updatePending = false;
-  const STREAM_THROTTLE_MS = 300; // 流式更新节流间隔（更快）
-  const MIN_CHARS_TO_UPDATE = 10; // 最少累积字符数才更新
+  let lastDisplayedText = '';
+  let updateTimer = null;
+  let isUpdating = false;
+  const STREAM_INTERVAL_MS = 500; // 定时更新间隔
   const chatId = ctx.chat?.id;
 
   // 初始化流式消息
@@ -394,39 +399,43 @@ async function runAgent(session, userText, progress, ctx) {
     } catch {}
   };
 
-  // 更新流式消息（带节流和字符缓冲）
-  const updateStreamMsg = async (text, force = false) => {
-    if (!streamMsgId || !chatId) return;
-    if (updatePending) return; // 防止并发更新
+  // 执行一次更新
+  const doUpdate = async () => {
+    if (!streamMsgId || !chatId || isUpdating) return;
+    if (fullResponse === lastDisplayedText) return; // 无变化
     
-    const now = Date.now();
-    const newChars = text.length - lastDisplayedLen;
-    
-    // 节流：时间不够 且 字符不够 且 不是强制更新
-    if (!force && now - lastStreamUpdate < STREAM_THROTTLE_MS && newChars < MIN_CHARS_TO_UPDATE) {
-      return;
-    }
-    
-    updatePending = true;
-    lastStreamUpdate = now;
-    lastDisplayedLen = text.length;
+    isUpdating = true;
+    lastDisplayedText = fullResponse;
     
     // 截断过长文本，保留最后部分
-    let displayText = text;
-    if (text.length > TG_MAX_LEN - 100) {
-      displayText = '...\n\n' + text.slice(-(TG_MAX_LEN - 100));
+    let displayText = fullResponse;
+    if (fullResponse.length > TG_MAX_LEN - 100) {
+      displayText = '...\n\n' + fullResponse.slice(-(TG_MAX_LEN - 100));
     }
     displayText += ' ▌'; // 添加光标效果
     
     try {
       await ctx.api.editMessageText(chatId, streamMsgId, displayText, { parse_mode: 'Markdown' });
     } catch {
-      // Markdown 解析失败时回退到纯文本
       try {
         await ctx.api.editMessageText(chatId, streamMsgId, displayText);
       } catch {}
     }
-    updatePending = false;
+    isUpdating = false;
+  };
+
+  // 启动定时更新
+  const startUpdateTimer = () => {
+    if (updateTimer) return;
+    updateTimer = setInterval(doUpdate, STREAM_INTERVAL_MS);
+  };
+
+  // 停止定时更新
+  const stopUpdateTimer = () => {
+    if (updateTimer) {
+      clearInterval(updateTimer);
+      updateTimer = null;
+    }
   };
 
   const unsub = session.subscribe((event) => {
@@ -467,31 +476,26 @@ async function runAgent(session, userText, progress, ctx) {
     switch (e.type) {
       case 'text_delta':
         fullResponse += e.delta;
-        // 流式更新消息
-        updateStreamMsg(fullResponse);
+        // 启动定时更新（如果还没启动）
+        startUpdateTimer();
         break;
       case 'tool_call_start':
         toolName = e.name || 'tool';
-        const label = TOOL_NAMES[toolName] || toolName;
-        progress.update(`🔧 ${label}`, Math.min(progress.phase + 10, 85));
-        break;
-      case 'tool_call_output':
-        if (e.content) {
-          const preview = String(e.content).slice(0, 80).replace(/\n/g, ' ');
-          progress.update(`   ↳ ${preview}`, Math.min(progress.phase + 5, 90));
-        }
         break;
       case 'tool_call_end':
-        progress.update(`✓ ${TOOL_NAMES[toolName] || toolName} 完成`, Math.min(progress.phase + 5, 90));
         break;
     }
   });
 
   try {
     await initStreamMsg();
+    startUpdateTimer();
     await session.prompt(userText);
   } finally {
+    stopUpdateTimer();
     unsub();
+    // 最后一次更新确保显示完整内容
+    await doUpdate();
   }
 
   // 如果有错误且没有响应，抛出错误
@@ -590,23 +594,30 @@ async function main() {
   async function pollNewSubmissions() {
     if (!pgPool || !ADMIN_USER) return;
     try {
+      // 只查询未处理的新消息（status 为空或 pending）
       const result = await pgPool.query(`
         SELECT id, name, contact_method, contact_value, message, status, created_at
         FROM vsmaios_contact_submission
-        WHERE created_at > $1
+        WHERE created_at > $1 AND (status IS NULL OR status = 'pending')
         ORDER BY created_at ASC
       `, [lastPollTime]);
 
       for (const row of result.rows) {
         const time = new Date(row.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
         const text =
-          `📬 新客户咨询\n\n` +
+          `📬 新客户咨询 #${row.id}\n\n` +
           `👤 姓名: ${row.name || '未知'}\n` +
           `📱 ${row.contact_method}: ${row.contact_value}\n` +
           `💬 消息: ${(row.message || '').slice(0, 500)}\n` +
           `⏰ 时间: ${time}`;
         try {
-          await bot.api.sendMessage(ADMIN_USER, text);
+          // 发送消息并添加“已处理”按钮
+          await bot.api.sendMessage(ADMIN_USER, text, {
+            reply_markup: new InlineKeyboard()
+              .text('✅ 标记已处理', `mark_done_${row.id}`)
+          });
+          // 展示后自动标记为处理中
+          await pgPool.query(`UPDATE vsmaios_contact_submission SET status = 'processing' WHERE id = $1`, [row.id]);
         } catch (err) {
           console.error('[PG] 推送失败:', err.message);
         }
@@ -905,32 +916,126 @@ async function main() {
       await ctx.reply('⚠️ 未配置 PostgreSQL 数据库。请在 .env 中设置 PG_CONNECTION_STRING。');
       return;
     }
+    // 显示分类菜单
+    await ctx.reply('📬 客户咨询管理', {
+      reply_markup: new InlineKeyboard()
+        .text('🟡 处理中', 'submissions_processing_0')
+        .text('✅ 已处理', 'submissions_done_0')
+        .row()
+        .text('📝 全部', 'submissions_all_0')
+        .text('🏠 主菜单', 'main_menu')
+    });
+  });
+
+  // 客户咨询列表回调
+  bot.callbackQuery(/^submissions_(processing|done|all)_(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    if (!isAdmin(ctx) || !pgPool) return;
+    
+    const match = ctx.callbackQuery.data.match(/^submissions_(processing|done|all)_(\d+)$/);
+    const filter = match[1];
+    const offset = parseInt(match[2]);
+    const limit = 5;
+    
+    let whereClause = '';
+    let filterLabel = '全部';
+    if (filter === 'processing') {
+      whereClause = "WHERE status = 'processing'";
+      filterLabel = '🟡 处理中';
+    } else if (filter === 'done') {
+      whereClause = "WHERE status = 'done'";
+      filterLabel = '✅ 已处理';
+    }
+    
     try {
+      const countResult = await pgPool.query(`SELECT COUNT(*) FROM vsmaios_contact_submission ${whereClause}`);
+      const total = parseInt(countResult.rows[0].count);
+      
       const result = await pgPool.query(`
         SELECT id, name, contact_method, contact_value, message, status, created_at
         FROM vsmaios_contact_submission
+        ${whereClause}
         ORDER BY created_at DESC
-        LIMIT 10
-      `);
+        LIMIT $1 OFFSET $2
+      `, [limit, offset]);
+      
       if (result.rows.length === 0) {
-        await ctx.reply('📭 暂无客户咨询记录。');
+        await ctx.editMessageText(`📭 ${filterLabel} - 暂无记录`, {
+          reply_markup: new InlineKeyboard()
+            .text('⬅️ 返回', 'submissions_menu')
+        });
         return;
       }
-      let text = '📬 最近 10 条客户咨询\n\n';
+      
+      let text = `📬 ${filterLabel} (第 ${offset + 1}-${Math.min(offset + limit, total)} 条，共 ${total} 条)\n\n`;
+      
       for (const row of result.rows) {
         const time = new Date(row.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+        const statusIcon = row.status === 'done' ? '✅' : (row.status === 'processing' ? '🟡' : '⚪');
         text += `━━━━━━━━━━━━━━━\n`;
-        text += `👤 ${row.name || '未知'}\n`;
+        text += `#${row.id} ${statusIcon} ${row.name || '未知'}\n`;
         text += `📱 ${row.contact_method}: ${row.contact_value}\n`;
-        text += `💬 ${(row.message || '').slice(0, 100)}${row.message?.length > 100 ? '...' : ''}\n`;
-        text += `📊 状态: ${row.status || '待处理'}\n`;
+        text += `💬 ${(row.message || '').slice(0, 80)}${row.message?.length > 80 ? '...' : ''}\n`;
         text += `⏰ ${time}\n`;
       }
-      await ctx.reply(text, {
-        reply_markup: new InlineKeyboard().text('🏠 主菜单', 'main_menu'),
-      });
+      
+      // 分页按钮
+      const kb = new InlineKeyboard();
+      if (offset > 0) {
+        kb.text('⬅️ 上一页', `submissions_${filter}_${offset - limit}`);
+      }
+      if (offset + limit < total) {
+        kb.text('下一页 ➡️', `submissions_${filter}_${offset + limit}`);
+      }
+      kb.row();
+      
+      // 为处理中的消息添加“标记已处理”按钮
+      if (filter === 'processing') {
+        for (const row of result.rows) {
+          kb.text(`✅ #${row.id}`, `mark_done_${row.id}`);
+        }
+        kb.row();
+      }
+      
+      kb.text('🟡 处理中', 'submissions_processing_0')
+        .text('✅ 已处理', 'submissions_done_0')
+        .row()
+        .text('🏠 主菜单', 'main_menu');
+      
+      await ctx.editMessageText(text, { reply_markup: kb });
     } catch (err) {
-      await ctx.reply(`❌ 查询失败: ${err.message}`);
+      await ctx.editMessageText(`❌ 查询失败: ${err.message}`);
+    }
+  });
+
+  // 返回咨询菜单
+  bot.callbackQuery('submissions_menu', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText('📬 客户咨询管理', {
+      reply_markup: new InlineKeyboard()
+        .text('🟡 处理中', 'submissions_processing_0')
+        .text('✅ 已处理', 'submissions_done_0')
+        .row()
+        .text('📝 全部', 'submissions_all_0')
+        .text('🏠 主菜单', 'main_menu')
+    });
+  });
+
+  // 标记已处理回调
+  bot.callbackQuery(/^mark_done_(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery({ text: '已标记为已处理' });
+    if (!isAdmin(ctx) || !pgPool) return;
+    
+    const match = ctx.callbackQuery.data.match(/^mark_done_(\d+)$/);
+    const id = parseInt(match[1]);
+    
+    try {
+      await pgPool.query(`UPDATE vsmaios_contact_submission SET status = 'done' WHERE id = $1`, [id]);
+      // 更新消息文本，移除按钮
+      const msgText = ctx.callbackQuery.message?.text || '';
+      await ctx.editMessageText(msgText + '\n\n✅ 已标记为已处理');
+    } catch (err) {
+      console.error('[PG] 标记失败:', err.message);
     }
   });
 

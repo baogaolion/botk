@@ -8,3 +8,4 @@ services:
       - ./uploads:/app/uploads
       - ./data:/app/data
       - ./.pi:/app/.pi
+      - /home/administrator/Documents:/home/administrator/Documents

@@ -15,6 +15,7 @@ import { streamSimple } from '@mariozechner/pi-ai';
 import { AGENT_DIR, USER_DOCS_DIR, TG_MAX_LEN, STREAM_THROTTLE_MS, TYPING_INTERVAL_MS } from './config.js';
 import { getCurrentModel, getCurrentModelName, logApiKeyStatus } from './models.js';
 import { convertToTelegramMarkdown } from './utils.js';
+import { scanInstalledSkills, getInstalledSkillsPrompt } from './skills.js';
 
 // ==================== 全局共享变量 ====================
 
@@ -23,6 +24,8 @@ let sharedSettingsManager, sharedLoader, sharedUserLoader, sharedAuth;
 // ==================== 系统提示 ====================
 
 function getAdminPrompt() {
+  const installedSkillsPrompt = getInstalledSkillsPrompt();
+  
   return [
     '你是 bao，一个万能私人助手。用中文回复。',
     `当前工作目录: ${process.cwd()}`,
@@ -37,18 +40,22 @@ function getAdminPrompt() {
     '- 当用户上传任何文件（图片、文档、音频等）时，询问用户是否要保存到文档目录',
     '- 如果用户确认保存，将文件保存到文档目录并告知保存路径',
     '',
-    '## 技能扩展',
-    '当用户的需求超出你当前能力时，使用 find-skills 技能搜索并安装新技能。',
-    '步骤：1. 用 bash 执行 npx skills find "关键词" 搜索',
-    '2. 找到后执行 npx skills add <package> -g -y 安装',
-    '3. 安装后使用新技能完成任务',
-    '如果搜索不到技能，就用 bash 和其他基础工具直接完成。',
+    installedSkillsPrompt,
+    '## 技能扩展规则',
+    '1. **优先使用已安装的技能**：上面列出的技能已经安装，直接使用即可',
+    '2. **只有当已安装技能无法满足需求时**，才使用 find-skills 搜索新技能',
+    '3. 搜索新技能：用 bash 执行 `npx skills find "关键词"`',
+    '4. 安装新技能：`npx skills add <package> -g -y`',
+    '5. 安装后的技能会被保留，下次可直接使用',
+    '6. 如果搜索不到技能，就用 bash 和其他基础工具直接完成',
     '',
     '保持简洁、有用、接地气。不要说废话。',
   ].join('\n');
 }
 
 function getUserPrompt() {
+  const installedSkillsPrompt = getInstalledSkillsPrompt();
+  
   return [
     '你是 bao，一个万能私人助手。用中文回复。',
     `当前工作目录: ${process.cwd()}`,
@@ -69,7 +76,11 @@ function getUserPrompt() {
     `- **禁止扫描其他目录**：不要扫描 /home、/etc、/var 等系统目录`,
     '- 当用户上传任何文件时，告知用户你可以分析该文件，但无法保存（需要管理员权限）',
     '',
-    '当用户的需求超出你当前能力时，使用 find-skills 技能搜索并安装新技能。',
+    installedSkillsPrompt,
+    '## 技能扩展规则',
+    '1. **优先使用已安装的技能**：上面列出的技能已经安装，直接使用即可',
+    '2. **只有当已安装技能无法满足需求时**，才使用 find-skills 搜索新技能',
+    '',
     '保持简洁、有用、接地气。不要说废话。',
   ].join('\n');
 }
@@ -78,6 +89,9 @@ function getUserPrompt() {
 
 export async function initPiGlobals() {
   logApiKeyStatus();
+  
+  // 扫描已安装的技能
+  scanInstalledSkills();
   
   const model = getCurrentModel();
   if (!model) throw new Error('没有可用的模型，请检查 API Key 配置');

@@ -8,6 +8,7 @@ import { getAvailableModels, getCurrentModelName, getCurrentModelIndex, setCurre
 import { getSession, deleteSession, getSessionCount, clearAllSessions } from '../session.js';
 import { getPgPool, querySubmissions, markAsDone } from '../submissions.js';
 import { formatBytes } from '../utils.js';
+import { getInstalledSkills, scanInstalledSkills } from '../skills.js';
 import { welcomeKb, createMainMenuKb, createModelKb, createSubmissionsMenuKb, createSubmissionsListKb } from './keyboards.js';
 import { userRepo, fileRepo, taskRepo, dbStats, allowRepo } from '../../db.js';
 
@@ -124,18 +125,35 @@ export function registerCommands(bot, runningTasks, lastMessages) {
   // /skills
   bot.command('skills', async (ctx) => {
     if (!isAllowed(ctx)) return;
-    await ctx.reply(
-      '📚 技能列表\n\n' +
+    
+    // 重新扫描已安装的技能
+    scanInstalledSkills();
+    const installedSkills = getInstalledSkills();
+    const customSkills = installedSkills.filter(s => s.name !== 'find-skills');
+    
+    let text = '📚 技能列表\n\n' +
       '🔧 内置工具:\n' +
       '  read - 读取文件\n' +
       '  write - 写入文件\n' +
       '  edit - 编辑文件\n' +
       '  bash - 执行命令\n\n' +
       '🔌 预置技能:\n' +
-      '  find-skills - 搜索安装新技能\n\n' +
-      '💡 需要新技能时我会自动搜索安装！',
-      { reply_markup: createMainMenuKb() }
-    );
+      '  find-skills - 搜索安装新技能\n';
+    
+    if (customSkills.length > 0) {
+      text += '\n📦 已安装技能:\n';
+      for (const skill of customSkills) {
+        text += `  ${skill.name}`;
+        if (skill.description && skill.description !== skill.name) {
+          text += ` - ${skill.description}`;
+        }
+        text += '\n';
+      }
+    }
+    
+    text += '\n💡 已安装的技能会优先使用，无需重新搜索！';
+    
+    await ctx.reply(text, { reply_markup: createMainMenuKb() });
   });
 
   // /mydata

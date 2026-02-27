@@ -49,7 +49,15 @@ const MODEL_DEFINITIONS = [
 
 // 获取当前可用的模型（API Key 已配置的）
 function getAvailableModels() {
-  return MODEL_DEFINITIONS.filter(m => process.env[m.envKey]);
+  // 调试：打印所有 API key 环境变量状态
+  console.log('[DEBUG] API Key status:');
+  console.log('  DEEPSEEK_API_KEY:', process.env.DEEPSEEK_API_KEY ? 'SET' : 'NOT SET');
+  console.log('  OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? 'SET' : 'NOT SET');
+  console.log('  GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? 'SET' : 'NOT SET');
+  console.log('  MOONSHOT_API_KEY:', process.env.MOONSHOT_API_KEY ? 'SET' : 'NOT SET');
+  const available = MODEL_DEFINITIONS.filter(m => process.env[m.envKey]);
+  console.log('[DEBUG] Available models count:', available.length);
+  return available;
 }
 
 // 当前选择的模型索引（默认第一个可用模型）

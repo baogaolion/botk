@@ -186,7 +186,7 @@ class ProgressMessage {
 
 // ==================== PI Agent (全局共享) ====================
 
-let sharedSettingsManager, sharedLoader, sharedUserLoader, sharedModel;
+let sharedSettingsManager, sharedLoader, sharedUserLoader, sharedModel, sharedAuth;
 
 // 获取当前选择的模型对象
 function getCurrentModel() {
@@ -216,6 +216,13 @@ function getCurrentModelName() {
 async function initPiGlobals() {
   const available = getAvailableModels();
   if (!available.length) throw new Error('没有可用的模型，请检查 GEMINI_API_KEY 或 MOONSHOT_API_KEY');
+  
+  // 初始化 AuthStorage 并设置 API keys
+  sharedAuth = AuthStorage.inMemory();
+  if (process.env.DEEPSEEK_API_KEY) {
+    sharedAuth.setRuntimeApiKey('deepseek', process.env.DEEPSEEK_API_KEY);
+    console.log('[DEBUG] DeepSeek API key set in AuthStorage');
+  }
   
   // 获取默认模型
   sharedModel = getCurrentModel();
@@ -281,19 +288,14 @@ async function createPiSession(admin = false) {
     model,
     thinkingLevel: 'off',
     tools: codingTools,
+    authStorage: sharedAuth,
     resourceLoader: admin ? sharedLoader : sharedUserLoader,
     sessionManager: SessionManager.inMemory(),
     settingsManager: sharedSettingsManager,
   });
   
-  // 设置流式处理函数，为自定义模型（如 DeepSeek）传递 API key
-  if (model.provider === 'deepseek' && process.env.DEEPSEEK_API_KEY) {
-    session.agent.streamFn = (model, context) => streamSimple(model, context, {
-      apiKey: process.env.DEEPSEEK_API_KEY,
-    });
-  } else {
-    session.agent.streamFn = streamSimple;
-  }
+  // 设置流式处理函数
+  session.agent.streamFn = streamSimple;
   
   return session;
 }

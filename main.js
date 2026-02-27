@@ -188,7 +188,7 @@ class ProgressMessage {
 
 // ==================== PI Agent (全局共享) ====================
 
-let sharedSettingsManager, sharedLoader, sharedUserLoader, sharedModel, sharedAuth;
+let sharedSettingsManager, sharedLoader, sharedUserLoader, sharedModel;
 
 // 获取当前选择的模型对象
 function getCurrentModel() {
@@ -218,13 +218,6 @@ function getCurrentModelName() {
 async function initPiGlobals() {
   const available = getAvailableModels();
   if (!available.length) throw new Error('没有可用的模型，请检查 GEMINI_API_KEY 或 MOONSHOT_API_KEY');
-  
-  // 初始化 AuthStorage 并设置 API keys
-  sharedAuth = AuthStorage.create(resolve(AGENT_DIR, 'auth.json'));
-  if (process.env.DEEPSEEK_API_KEY) {
-    sharedAuth.setRuntimeApiKey('deepseek', process.env.DEEPSEEK_API_KEY);
-    console.log('[DEBUG] DeepSeek API key set in AuthStorage');
-  }
   
   // 获取默认模型
   sharedModel = getCurrentModel();
@@ -290,7 +283,6 @@ async function createPiSession(admin = false) {
     model,
     thinkingLevel: 'off',
     tools: codingTools,
-    authStorage: sharedAuth,
     resourceLoader: admin ? sharedLoader : sharedUserLoader,
     sessionManager: SessionManager.inMemory(),
     settingsManager: sharedSettingsManager,

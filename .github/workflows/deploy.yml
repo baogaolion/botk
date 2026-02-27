@@ -94,12 +94,16 @@ jobs:
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             
             # 4. 停止旧容器并启动新容器
-            echo "[4/5] 重启服务..."
+            echo "[4/6] 重启服务..."
             docker compose down || true
             docker compose up -d
             
-            # 5. 清理旧镜像
-            echo "[5/5] 清理旧镜像..."
+            # 5. 加入 vsmaios-net 网络（用于连接 PostgreSQL）
+            echo "[5/6] 配置网络..."
+            docker network connect vsmaios-net botk 2>/dev/null || echo "已在网络中或网络不存在"
+            
+            # 6. 清理旧镜像
+            echo "[6/6] 清理旧镜像..."
             docker image prune -af --filter "until=168h" || true
             
             echo "=== ✅ Botk 部署完成 ==="

@@ -166,6 +166,9 @@ export async function createPiSession(admin = false) {
 
 // ==================== 运行 Agent ====================
 
+// 最大工具执行轮次（防止无限循环）
+const MAX_TOOL_TURNS = 5;
+
 export async function runAgent(session, userText, progress, ctx) {
   let fullResponse = '';
   let toolName = '';
@@ -178,6 +181,7 @@ export async function runAgent(session, userText, progress, ctx) {
   let loadingTimer = null;
   let loadingFrame = 0;
   let isUpdating = false;
+  let toolTurnCount = 0; // 工具执行轮次计数
   const chatId = ctx.chat?.id;
   
   // 加载动画帧
@@ -428,7 +432,14 @@ export async function runAgent(session, userText, progress, ctx) {
   // 监听工具执行事件
   const toolUnsub = session.subscribe((event) => {
     if (event.type === 'tool_execution_start') {
-      console.log(`[Stream] 工具执行开始`);
+      toolTurnCount++;
+      console.log(`[Stream] 工具执行开始 (第 ${toolTurnCount}/${MAX_TOOL_TURNS} 轮)`);
+      
+      // 超过最大轮次时中止
+      if (toolTurnCount >= MAX_TOOL_TURNS) {
+        console.log(`[Stream] ⚠️ 工具执行次数达到上限，中止会话`);
+        session.abort();
+      }
     } else if (event.type === 'tool_execution_end') {
       console.log(`[Stream] 工具执行结束`);
       toolName = ''; // 工具执行完毕，清除工具名

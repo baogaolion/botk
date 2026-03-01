@@ -23,7 +23,7 @@ export const SESSION_MAX = 20;
 
 // ==================== 流式输出配置 ====================
 
-export const STREAM_THROTTLE_MS = 450;
+export const STREAM_THROTTLE_MS = 800;
 export const TYPING_INTERVAL_MS = 4000;
 
 // ==================== PostgreSQL 配置 ====================

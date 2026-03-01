@@ -256,9 +256,15 @@ export async function runAgent(session, userText, progress, ctx) {
   };
 
   let lastSentText = '';
+  let rateLimitedUntil = 0; // 429 限流退避时间
   
   const doUpdate = async () => {
     if (isUpdating) {
+      return;
+    }
+    
+    // 429 限流退避
+    if (Date.now() < rateLimitedUntil) {
       return;
     }
     
@@ -302,26 +308,28 @@ export async function runAgent(session, userText, progress, ctx) {
         lastSentText = displayText;
         lastDisplayedText = fullResponse;
       } catch (err) {
-        // 忽略 "message is not modified" 错误
-        if (!err.message?.includes('not modified')) {
-          console.log(`[Stream] Markdown编辑失败: ${err.message}, 尝试纯文本`);
+        // 429 限流错误：暂停更新
+        if (err.message?.includes('429') || err.message?.includes('Too Many Requests')) {
+          const retryMatch = err.message.match(/retry after (\d+)/);
+          const retryAfter = retryMatch ? parseInt(retryMatch[1]) * 1000 : 30000;
+          rateLimitedUntil = Date.now() + retryAfter;
+          console.log(`[Stream] 429 限流，暂停 ${retryAfter / 1000} 秒`);
+        } else if (!err.message?.includes('not modified')) {
           // Markdown 失败时回退到纯文本
           try {
             await ctx.api.editMessageText(chatId, streamMsgId, displayText);
             lastSentText = displayText;
             lastDisplayedText = fullResponse;
           } catch (err2) {
-            if (!err2.message?.includes('not modified')) {
-              console.log(`[Stream] 纯文本编辑也失败: ${err2.message}`);
+            if (err2.message?.includes('429') || err2.message?.includes('Too Many Requests')) {
+              const retryMatch = err2.message.match(/retry after (\d+)/);
+              const retryAfter = retryMatch ? parseInt(retryMatch[1]) * 1000 : 30000;
+              rateLimitedUntil = Date.now() + retryAfter;
+              console.log(`[Stream] 429 限流，暂停 ${retryAfter / 1000} 秒`);
             }
           }
         }
       }
-    }
-    
-    const updateDuration = Date.now() - updateStart;
-    if (updateDuration > 300) {
-      console.log(`[Stream] 更新耗时: ${updateDuration}ms, 文本长度: ${displayText.length}`);
     }
     
     isUpdating = false;

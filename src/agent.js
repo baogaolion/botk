@@ -10,6 +10,7 @@ import {
   codingTools,
   DefaultResourceLoader,
   SettingsManager,
+  ModelRegistry,
 } from '@mariozechner/pi-coding-agent';
 import { streamSimple } from '@mariozechner/pi-ai';
 import { AGENT_DIR, USER_DOCS_DIR, TG_MAX_LEN, STREAM_THROTTLE_MS, TYPING_INTERVAL_MS } from './config.js';
@@ -19,7 +20,7 @@ import { scanInstalledSkills, getInstalledSkillsPrompt } from './skills.js';
 
 // ==================== 全局共享变量 ====================
 
-let sharedSettingsManager, sharedLoader, sharedUserLoader, sharedAuth;
+let sharedSettingsManager, sharedLoader, sharedUserLoader, sharedAuth, sharedModelRegistry;
 
 // ==================== 系统提示 ====================
 
@@ -94,10 +95,21 @@ export async function initPiGlobals() {
   if (!model) throw new Error('没有可用的模型，请检查 API Key 配置');
 
   sharedAuth = new AuthStorage(resolve(AGENT_DIR, 'auth.json'));
+  
+  // 设置所有 API Key
   if (process.env.DEEPSEEK_API_KEY) {
     sharedAuth.setRuntimeApiKey('deepseek', process.env.DEEPSEEK_API_KEY);
     console.log('[DEBUG] AuthStorage deepseek key: SET');
   }
+  if (process.env.OPENAI_API_KEY) {
+    sharedAuth.setRuntimeApiKey('openai', process.env.OPENAI_API_KEY);
+  }
+  if (process.env.GEMINI_API_KEY) {
+    sharedAuth.setRuntimeApiKey('google', process.env.GEMINI_API_KEY);
+  }
+  
+  // 创建 ModelRegistry
+  sharedModelRegistry = new ModelRegistry(sharedAuth);
 
   console.log('[DEBUG] Selected model:', getCurrentModelName());
 
@@ -136,6 +148,7 @@ export async function createPiSession(admin = false) {
     thinkingLevel: 'off',
     tools: codingTools,
     authStorage: sharedAuth,
+    modelRegistry: sharedModelRegistry,
     resourceLoader: admin ? sharedLoader : sharedUserLoader,
     sessionManager: SessionManager.inMemory(),
     settingsManager: sharedSettingsManager,
@@ -238,25 +251,14 @@ export async function runAgent(session, userText, progress, ctx) {
     }
   };
 
+  let lastSentText = '';
+  
   const doUpdate = async () => {
     if (isUpdating) {
-      // console.log(`[Stream] 跳过更新: 正在更新中`);
-      return;
-    }
-    if (fullResponse === lastDisplayedText && !toolName) {
-      // console.log(`[Stream] 跳过更新: 无变化`);
       return;
     }
     
-    const updateStart = Date.now();
-    
-    // 有内容后停止加载动画
-    if (fullResponse.trim()) {
-      stopLoadingAnimation();
-    }
-    
-    isUpdating = true;
-    
+    // 构建显示文本
     let displayText = fullResponse;
     if (fullResponse.length > TG_MAX_LEN - 100) {
       displayText = '...\n\n' + fullResponse.slice(-(TG_MAX_LEN - 100));
@@ -270,6 +272,20 @@ export async function runAgent(session, userText, progress, ctx) {
     }
     displayText += ' ▌';
     
+    // 检查是否有变化，避免重复调用 API
+    if (displayText === lastSentText) {
+      return;
+    }
+    
+    const updateStart = Date.now();
+    
+    // 有内容后停止加载动画
+    if (fullResponse.trim()) {
+      stopLoadingAnimation();
+    }
+    
+    isUpdating = true;
+    
     // 转换标准 Markdown 为 Telegram 格式
     const telegramText = convertToTelegramMarkdown(displayText);
     
@@ -279,15 +295,22 @@ export async function runAgent(session, userText, progress, ctx) {
       
       try {
         await ctx.api.editMessageText(chatId, streamMsgId, telegramText, { parse_mode: 'Markdown' });
+        lastSentText = displayText;
         lastDisplayedText = fullResponse;
       } catch (err) {
-        console.log(`[Stream] Markdown编辑失败: ${err.message}, 尝试纯文本`);
-        // Markdown 失败时回退到纯文本
-        try {
-          await ctx.api.editMessageText(chatId, streamMsgId, displayText);
-          lastDisplayedText = fullResponse;
-        } catch (err2) {
-          console.log(`[Stream] 纯文本编辑也失败: ${err2.message}`);
+        // 忽略 "message is not modified" 错误
+        if (!err.message?.includes('not modified')) {
+          console.log(`[Stream] Markdown编辑失败: ${err.message}, 尝试纯文本`);
+          // Markdown 失败时回退到纯文本
+          try {
+            await ctx.api.editMessageText(chatId, streamMsgId, displayText);
+            lastSentText = displayText;
+            lastDisplayedText = fullResponse;
+          } catch (err2) {
+            if (!err2.message?.includes('not modified')) {
+              console.log(`[Stream] 纯文本编辑也失败: ${err2.message}`);
+            }
+          }
         }
       }
     }
@@ -377,19 +400,28 @@ export async function runAgent(session, userText, progress, ctx) {
       case 'text_end':
         // 文本结束
         break;
-      case 'toolcall_start':
-        // PI SDK 使用 toolcall_start 而不是 tool_call_start
-        toolName = e.name || e.toolName || 'tool';
+      case 'toolcall_start': {
+        // 从 partial.content[contentIndex] 获取工具名
+        const toolCall = e.partial?.content?.[e.contentIndex];
+        toolName = toolCall?.name || 'tool';
         console.log(`[Stream] 工具开始: ${toolName}`);
         doUpdate();
         break;
+      }
       case 'toolcall_delta':
         // 工具调用参数增量，忽略
         break;
-      case 'toolcall_end':
-        console.log(`[Stream] 工具结束: ${toolName}`);
+      case 'toolcall_end': {
+        // toolcall_end 包含完整的 toolCall 对象
+        const endToolName = e.toolCall?.name || toolName;
+        console.log(`[Stream] 工具结束: ${endToolName}`);
+        // 更新工具名（如果之前没获取到）
+        if (!toolName || toolName === 'tool') {
+          toolName = endToolName;
+        }
         // 不立即清除 toolName，等工具执行完再清除
         break;
+      }
     }
   });
   

@@ -7,7 +7,7 @@ import { InlineKeyboard } from 'grammy';
 // 主菜单键盘
 export const welcomeKb = new InlineKeyboard()
   .text('📚 已装技能', 'skills_list')
-  .text('🤖 切换模型', 'select_model')
+  .text('🤖 切换模型', 'show_models')
   .row()
   .text('📬 客户咨询', 'submissions_menu');
 

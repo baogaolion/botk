@@ -13,7 +13,33 @@ import { ProgressMessage } from '../progress.js';
 import { sendLongText, formatBytes, convertToTelegramMarkdown } from '../utils.js';
 import { isAdmin, isAllowed, sessionKey, touchUser } from './commands.js';
 import { createDoneKb } from './keyboards.js';
-import { userRepo, fileRepo, taskRepo } from '../../db.js';
+import { userRepo, fileRepo, taskRepo, skillUsageRepo } from '../../db.js';
+
+/**
+ * 解析并保存 AI 输出中的技能使用方式
+ */
+function parseAndSaveSkillUsage(response) {
+  const regex = /\[SAVE_SKILL_USAGE\]\s*\n?skill:\s*(.+?)\s*\n?usage:\s*([\s\S]+?)\s*\n?desc:\s*(.+?)\s*\n?\[\/SAVE_SKILL_USAGE\]/gi;
+  let match;
+  let savedCount = 0;
+  
+  while ((match = regex.exec(response)) !== null) {
+    const skillName = match[1].trim();
+    const usage = match[2].trim();
+    const desc = match[3].trim();
+    
+    if (skillName && usage) {
+      skillUsageRepo.set(skillName, usage, desc);
+      console.log(`[Skills] 已保存技能用法: ${skillName}`);
+      savedCount++;
+    }
+  }
+  
+  // 从响应中移除 SAVE_SKILL_USAGE 标记（不显示给用户）
+  const cleanedResponse = response.replace(regex, '').trim();
+  
+  return { cleanedResponse, savedCount };
+}
 
 export function registerMessageHandlers(bot, runningTasks, lastMessages) {
   
@@ -60,20 +86,23 @@ export function registerMessageHandlers(bot, runningTasks, lastMessages) {
         ? `${(duration / 60000).toFixed(1)}分钟`
         : `${(duration / 1000).toFixed(1)}秒`;
 
+      // 解析并保存技能使用方式
+      const { cleanedResponse } = parseAndSaveSkillUsage(result.response);
+
       const doneKb = createDoneKb();
 
       if (result.streamMsgId) {
         try {
-          const finalText = result.response + `\n\n⏱ ${durationStr}`;
+          const finalText = cleanedResponse + `\n\n⏱ ${durationStr}`;
           await ctx.api.editMessageText(chatId, result.streamMsgId, finalText, { reply_markup: doneKb, parse_mode: 'Markdown' });
         } catch {
           try {
-            const finalText = result.response + `\n\n⏱ ${durationStr}`;
+            const finalText = cleanedResponse + `\n\n⏱ ${durationStr}`;
             await ctx.api.editMessageText(chatId, result.streamMsgId, finalText, { reply_markup: doneKb });
           } catch {}
         }
-      } else if (result.response && result.response.trim()) {
-        await sendLongText(ctx, result.response + `\n\n⏱ ${durationStr}`, doneKb);
+      } else if (cleanedResponse && cleanedResponse.trim()) {
+        await sendLongText(ctx, cleanedResponse + `\n\n⏱ ${durationStr}`, doneKb);
       }
 
       taskRepo.add(ctx.from.id, userText, duration, 'ok');

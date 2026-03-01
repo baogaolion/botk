@@ -52,6 +52,13 @@ export function initDb() {
       added_by INTEGER,
       added_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS skill_usage (
+      skill_name TEXT PRIMARY KEY,
+      usage_example TEXT NOT NULL,
+      description TEXT,
+      updated_at INTEGER NOT NULL
+    );
   `);
 
   return db;
@@ -205,6 +212,41 @@ export const allowRepo = {
       FROM allowed_users a LEFT JOIN users u ON a.user_id = u.user_id
       ORDER BY a.added_at DESC
     `).all();
+  },
+};
+
+// ==================== Skill Usage Cache ====================
+
+export const skillUsageRepo = {
+  get(skillName) {
+    return stmt('skill_get', `
+      SELECT * FROM skill_usage WHERE skill_name = ?
+    `).get(skillName);
+  },
+
+  set(skillName, usageExample, description = '') {
+    stmt('skill_set', `
+      INSERT INTO skill_usage (skill_name, usage_example, description, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(skill_name) DO UPDATE SET
+        usage_example = excluded.usage_example,
+        description = excluded.description,
+        updated_at = excluded.updated_at
+    `).run(skillName, usageExample, description, Date.now());
+  },
+
+  delete(skillName) {
+    stmt('skill_del', 'DELETE FROM skill_usage WHERE skill_name = ?').run(skillName);
+  },
+
+  list() {
+    return stmt('skill_list', `
+      SELECT * FROM skill_usage ORDER BY updated_at DESC
+    `).all();
+  },
+
+  clear() {
+    stmt('skill_clear', 'DELETE FROM skill_usage').run();
   },
 };
 

@@ -11,6 +11,7 @@ import { resolve } from 'path';
 import { readdirSync, existsSync, readFileSync, lstatSync, realpathSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { AGENT_DIR } from './config.js';
+import { skillUsageRepo } from '../db.js';
 
 // 所有可能的 skill 目录
 const SKILL_DIRS = [
@@ -79,11 +80,12 @@ function scanSkillDir(skillsDir, foundNames) {
 }
 
 /**
- * 解析 SKILL.md 文件
+ * 解析 SKILL.md 文件，并自动缓存使用方式
  */
 function parseSkillMd(mdPath, skillName, skillPath) {
   let description = '';
   let keywords = [];
+  let usageExample = '';
   
   try {
     const content = readFileSync(mdPath, 'utf-8');
@@ -97,13 +99,29 @@ function parseSkillMd(mdPath, skillName, skillPath) {
     if (keywordsMatch) {
       keywords = keywordsMatch[1].split(/[,，]/).map(k => k.trim()).filter(Boolean);
     }
+    
+    // 提取使用方式：查找代码块中的 curl 或 bash 命令
+    const codeBlockMatch = content.match(/```(?:bash|sh|shell)?\s*\n([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      usageExample = codeBlockMatch[1].trim();
+    }
+    
+    // 如果没有缓存且有使用方式，自动保存
+    if (usageExample && skillName !== 'find-skills') {
+      const cached = skillUsageRepo.get(skillName);
+      if (!cached) {
+        skillUsageRepo.set(skillName, usageExample, description);
+        console.log(`[Skills] 自动缓存技能用法: ${skillName}`);
+      }
+    }
   } catch {}
   
   return {
     name: skillName,
     path: skillPath,
     description: description || skillName,
-    keywords
+    keywords,
+    usageExample
   };
 }
 
@@ -142,6 +160,7 @@ export function getInstalledSkillNames() {
 
 /**
  * 生成已安装 skill 的提示文本
+ * 如果有缓存的使用方式，直接提供；否则提示读取 SKILL.md
  */
 export function getInstalledSkillsPrompt() {
   const skills = installedSkills.filter(s => s.name !== 'find-skills');
@@ -153,19 +172,46 @@ export function getInstalledSkillsPrompt() {
   let prompt = '## 已安装的技能（必须优先使用）\n';
   prompt += '以下技能已安装，**直接使用，不要搜索**：\n\n';
   
+  // 分类：有缓存使用方式的 和 没有的
+  const cachedSkills = [];
+  const uncachedSkills = [];
+  
   for (const skill of skills) {
-    prompt += `- **${skill.name}**`;
-    if (skill.description && skill.description !== skill.name) {
-      prompt += `: ${skill.description}`;
+    const cached = skillUsageRepo.get(skill.name);
+    if (cached && cached.usage_example) {
+      cachedSkills.push({ ...skill, cached });
+    } else {
+      uncachedSkills.push(skill);
     }
-    prompt += ` → 用 \`read ${skill.path}/SKILL.md\` 查看用法\n`;
   }
   
-  prompt += '\n**使用技能的步骤**：\n';
-  prompt += '1. 先用 `read` 读取技能的 SKILL.md 文件了解用法\n';
-  prompt += '2. 按照 SKILL.md 中的说明执行（通常是 curl 或 bash 命令）\n';
-  prompt += '3. 只输出最终结果，不要输出中间过程\n';
-  prompt += '\n**禁止**：不要尝试直接运行技能名作为命令，不要搜索已安装的技能。\n';
+  // 有缓存的技能：直接提供使用方式
+  if (cachedSkills.length > 0) {
+    prompt += '### 可直接使用（已学习用法）\n';
+    for (const skill of cachedSkills) {
+      prompt += `\n**${skill.name}**`;
+      if (skill.cached.description) {
+        prompt += `: ${skill.cached.description}`;
+      }
+      prompt += '\n```\n' + skill.cached.usage_example + '\n```\n';
+    }
+  }
+  
+  // 没有缓存的技能：需要先读取 SKILL.md
+  if (uncachedSkills.length > 0) {
+    prompt += '\n### 需要先读取用法\n';
+    for (const skill of uncachedSkills) {
+      prompt += `- **${skill.name}**`;
+      if (skill.description && skill.description !== skill.name) {
+        prompt += `: ${skill.description}`;
+      }
+      prompt += ` → 先 \`read ${skill.path}/SKILL.md\`\n`;
+    }
+    prompt += '\n读取后，请用以下格式保存使用方式（方便下次直接用）：\n';
+    prompt += '```\n[SAVE_SKILL_USAGE]\nskill: 技能名\nusage: 具体的命令或调用方式\ndesc: 简短描述\n[/SAVE_SKILL_USAGE]\n```\n';
+  }
+  
+  prompt += '\n**规则**：直接执行，不要解释过程，只输出结果。\n';
   
   return prompt;
 }

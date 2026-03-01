@@ -8,7 +8,7 @@
  */
 
 import { resolve } from 'path';
-import { readdirSync, existsSync, readFileSync } from 'fs';
+import { readdirSync, existsSync, readFileSync, lstatSync, realpathSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { AGENT_DIR } from './config.js';
 
@@ -24,6 +24,18 @@ const SKILL_DIRS = [
 let installedSkills = [];
 
 /**
+ * 检查路径是否为目录（跟随符号链接）
+ */
+function isDirectoryOrSymlinkToDir(fullPath) {
+  try {
+    const stat = statSync(fullPath); // statSync 会跟随符号链接
+    return stat.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 扫描单个目录下的 skill
  */
 function scanSkillDir(skillsDir, foundNames) {
@@ -33,29 +45,32 @@ function scanSkillDir(skillsDir, foundNames) {
     const entries = readdirSync(skillsDir, { withFileTypes: true });
     
     for (const entry of entries) {
-      // 处理目录（包含 SKILL.md）
-      if (entry.isDirectory()) {
-        const skillName = entry.name;
-        if (foundNames.has(skillName)) continue; // 避免重复
+      const skillName = entry.name;
+      if (foundNames.has(skillName)) continue; // 避免重复
+      
+      const fullPath = resolve(skillsDir, skillName);
+      
+      // 处理目录或符号链接指向的目录
+      if (entry.isDirectory() || entry.isSymbolicLink()) {
+        // 检查是否为目录（跟随符号链接）
+        if (!isDirectoryOrSymlinkToDir(fullPath)) {
+          // 符号链接断开或指向文件，跳过
+          continue;
+        }
         
-        const skillPath = resolve(skillsDir, skillName);
-        const skillMdPath = resolve(skillPath, 'SKILL.md');
+        const skillMdPath = resolve(fullPath, 'SKILL.md');
         
         if (existsSync(skillMdPath)) {
-          const skillInfo = parseSkillMd(skillMdPath, skillName, skillPath);
+          const skillInfo = parseSkillMd(skillMdPath, skillName, fullPath);
           installedSkills.push(skillInfo);
           foundNames.add(skillName);
         }
       }
       // 处理直接的 .md 文件（根目录的 skill 文件）
       else if (entry.isFile() && entry.name.endsWith('.md') && entry.name !== 'README.md') {
-        const skillName = entry.name.replace(/\.md$/, '');
-        if (foundNames.has(skillName)) continue;
-        
-        const skillPath = resolve(skillsDir, entry.name);
-        const skillInfo = parseSkillMd(skillPath, skillName, skillsDir);
+        const skillInfo = parseSkillMd(fullPath, skillName.replace(/\.md$/, ''), skillsDir);
         installedSkills.push(skillInfo);
-        foundNames.add(skillName);
+        foundNames.add(skillName.replace(/\.md$/, ''));
       }
     }
   } catch (err) {

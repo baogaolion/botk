@@ -32,12 +32,11 @@ function getAdminPrompt() {
     `用户文档目录: ${USER_DOCS_DIR}`,
     '你拥有服务器完整权限：可以通过 bash 执行任意命令、读写编辑任何文件、访问网络（curl/wget）。',
     '',
-    '## 回复规则（极其重要）',
-    '- **只输出最终结果**，不要输出你的思考过程、尝试步骤、调试信息',
-    '- **不要解释你在做什么**，直接做然后给结果',
-    '- **不要说"让我..."、"我来..."、"让我检查..."**这类话',
-    '- **错误时简短说明**，不要长篇大论',
-    '- **一句话能说清的不要用两句**',
+    '## 回复规则',
+    '- **不要输出思考过程**：不要说"让我..."、"我来检查..."、"首先我需要..."',
+    '- **内容要完整**：结果要有结构、有条理，该有的信息都要有',
+    '- **直接给结果**：执行完直接展示结果，不要描述你做了什么',
+    '- **格式清晰**：适当使用标题、列表、代码块等格式',
     '',
     '## 文件操作规则',
     `- 文件分析范围：${USER_DOCS_DIR} 和 /app/uploads`,
@@ -48,8 +47,6 @@ function getAdminPrompt() {
     '1. **优先使用已安装的技能**：直接用，不要解释',
     '2. 没有合适技能时才搜索：`npx skills find "关键词"`',
     '3. 安装：`npx skills add <package> -g -y`',
-    '',
-    '简洁、直接、有用。不要废话。',
   ].join('\n');
 }
 
@@ -61,16 +58,15 @@ function getUserPrompt() {
     `当前工作目录: ${process.cwd()}`,
     `用户文档目录: ${USER_DOCS_DIR}`,
     '',
-    '## 回复规则（极其重要）',
-    '- **只输出最终结果**，不要输出思考过程、尝试步骤',
-    '- **不要解释你在做什么**，直接做然后给结果',
-    '- **不要说"让我..."、"我来..."**这类话',
-    '- **简短直接**，一句话能说清的不要用两句',
+    '## 回复规则',
+    '- **不要输出思考过程**：不要说"让我..."、"我来检查..."',
+    '- **内容要完整**：结果要有结构、有条理',
+    '- **直接给结果**：执行完直接展示结果',
+    '- **格式清晰**：适当使用标题、列表等格式',
     '',
     '## 权限',
     '- 只读命令：ls, cat, grep, find, curl, wget 等',
     '- 禁止写入、删除、修改操作',
-    '- 权限不足时简短告知',
     '',
     '## 文件操作',
     `- 范围：${USER_DOCS_DIR} 和上传文件`,
@@ -80,8 +76,6 @@ function getUserPrompt() {
     '## 技能',
     '- 优先用已安装技能，直接用不要解释',
     '- 没有才搜索新技能',
-    '',
-    '简洁、直接、有用。',
   ].join('\n');
 }
 
@@ -165,13 +159,18 @@ export async function runAgent(session, userText, progress, ctx) {
   let lastDisplayedText = '';
   let updateTimer = null;
   let typingTimer = null;
+  let loadingTimer = null;
+  let loadingFrame = 0;
   let isUpdating = false;
   const chatId = ctx.chat?.id;
+  
+  // 加载动画帧
+  const loadingFrames = ['💭 思考中', '💭 思考中.', '💭 思考中..', '💭 思考中...'];
 
   const initStreamMsg = async () => {
     if (streamMsgId) return;
     try {
-      const msg = await ctx.reply('💭 思考中...');
+      const msg = await ctx.reply(loadingFrames[0]);
       streamMsgId = msg.message_id;
     } catch {}
   };
@@ -193,25 +192,57 @@ export async function runAgent(session, userText, progress, ctx) {
       typingTimer = null;
     }
   };
+  
+  // 加载动画：在没有文字输出时显示闪烁效果
+  const updateLoadingAnimation = async () => {
+    if (!streamMsgId || fullResponse.trim()) return; // 有内容后停止动画
+    
+    loadingFrame = (loadingFrame + 1) % loadingFrames.length;
+    let text = loadingFrames[loadingFrame];
+    
+    // 如果正在执行工具，显示工具名
+    if (toolName) {
+      text = `🔧 ${toolName}...`;
+    }
+    
+    try {
+      await ctx.api.editMessageText(chatId, streamMsgId, text);
+    } catch {}
+  };
+  
+  const startLoadingAnimation = () => {
+    if (loadingTimer) return;
+    loadingTimer = setInterval(updateLoadingAnimation, 400);
+  };
+  
+  const stopLoadingAnimation = () => {
+    if (loadingTimer) {
+      clearInterval(loadingTimer);
+      loadingTimer = null;
+    }
+  };
 
   const doUpdate = async () => {
-    if (isUpdating) {
-      console.log('[Stream] 跳过更新: isUpdating=true');
-      return;
-    }
+    if (isUpdating) return;
     if (fullResponse === lastDisplayedText && !toolName) return;
     
+    // 有内容后停止加载动画
+    if (fullResponse.trim()) {
+      stopLoadingAnimation();
+    }
+    
     isUpdating = true;
-    const updateStart = Date.now();
     
     let displayText = fullResponse;
     if (fullResponse.length > TG_MAX_LEN - 100) {
       displayText = '...\n\n' + fullResponse.slice(-(TG_MAX_LEN - 100));
     }
     
-    // 如果正在执行工具，显示工具状态
-    if (toolName) {
-      displayText += `\n\n🔧 正在执行: ${toolName}...`;
+    // 如果正在执行工具且没有文字，显示工具状态
+    if (toolName && !fullResponse.trim()) {
+      displayText = `🔧 ${toolName}...`;
+    } else if (toolName) {
+      displayText += `\n\n🔧 ${toolName}...`;
     }
     displayText += ' ▌';
     
@@ -305,11 +336,13 @@ export async function runAgent(session, userText, progress, ctx) {
   try {
     startTypingTimer();
     await initStreamMsg();
+    startLoadingAnimation(); // 启动加载动画
     startUpdateTimer();
     await session.prompt(userText);
   } finally {
     stopUpdateTimer();
     stopTypingTimer();
+    stopLoadingAnimation(); // 停止加载动画
     unsub();
     await doUpdate();
   }

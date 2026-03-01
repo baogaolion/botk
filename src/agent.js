@@ -315,7 +315,7 @@ export async function runAgent(session, userText, progress, ctx) {
     lastEventTime = now;
     
     if (event.type === 'message_end') {
-      console.log(`[Stream] message_end, 响应长度: ${fullResponse.length}`);
+      console.log(`[Stream] message_end, 响应长度: ${fullResponse.length}, 工具: ${toolName || '无'}`);
       if (event.message?.errorMessage) {
         console.log(`[Stream] 错误: ${event.message.errorMessage}`);
         const msg = event.message.errorMessage;
@@ -348,7 +348,13 @@ export async function runAgent(session, userText, progress, ctx) {
         lastError = { status: 0, message: event.errorMessage };
       }
     }
-    if (event.type !== 'message_update') return;
+    // 记录非 message_update 事件
+    if (event.type !== 'message_update') {
+      if (event.type !== 'message_end') {
+        console.log(`[Stream] 事件: ${event.type}`);
+      }
+      return;
+    }
     const e = event.assistantMessageEvent;
     switch (e.type) {
       case 'text_delta':
@@ -363,6 +369,12 @@ export async function runAgent(session, userText, progress, ctx) {
       case 'tool_call_end':
         console.log(`[Stream] 工具结束: ${toolName}`);
         toolName = '';
+        break;
+      case 'tool_result':
+        console.log(`[Stream] 工具结果: ${toolName}`);
+        break;
+      default:
+        console.log(`[Stream] 助手事件: ${e.type}`);
         break;
     }
   });

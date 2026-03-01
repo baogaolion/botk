@@ -32,24 +32,24 @@ function getAdminPrompt() {
     `用户文档目录: ${USER_DOCS_DIR}`,
     '你拥有服务器完整权限：可以通过 bash 执行任意命令、读写编辑任何文件、访问网络（curl/wget）。',
     '',
-    '## 文件操作规则（重要）',
-    `- **文件分析范围限制**：只能在以下位置分析文件：`,
-    `  1. 用户文档目录: ${USER_DOCS_DIR}`,
-    `  2. 用户上传的文件（临时目录 /app/uploads）`,
-    `- **禁止扫描其他目录**：不要扫描 /home、/etc、/var 等系统目录`,
-    '- 当用户上传任何文件（图片、文档、音频等）时，询问用户是否要保存到文档目录',
-    '- 如果用户确认保存，将文件保存到文档目录并告知保存路径',
+    '## 回复规则（极其重要）',
+    '- **只输出最终结果**，不要输出你的思考过程、尝试步骤、调试信息',
+    '- **不要解释你在做什么**，直接做然后给结果',
+    '- **不要说"让我..."、"我来..."、"让我检查..."**这类话',
+    '- **错误时简短说明**，不要长篇大论',
+    '- **一句话能说清的不要用两句**',
+    '',
+    '## 文件操作规则',
+    `- 文件分析范围：${USER_DOCS_DIR} 和 /app/uploads`,
+    `- 禁止扫描系统目录`,
     '',
     installedSkillsPrompt,
     '## 技能扩展规则',
-    '1. **优先使用已安装的技能**：上面列出的技能已经安装，直接使用即可',
-    '2. **只有当已安装技能无法满足需求时**，才使用 find-skills 搜索新技能',
-    '3. 搜索新技能：用 bash 执行 `npx skills find "关键词"`',
-    '4. 安装新技能：`npx skills add <package> -g -y`',
-    '5. 安装后的技能会被保留，下次可直接使用',
-    '6. 如果搜索不到技能，就用 bash 和其他基础工具直接完成',
+    '1. **优先使用已安装的技能**：直接用，不要解释',
+    '2. 没有合适技能时才搜索：`npx skills find "关键词"`',
+    '3. 安装：`npx skills add <package> -g -y`',
     '',
-    '保持简洁、有用、接地气。不要说废话。',
+    '简洁、直接、有用。不要废话。',
   ].join('\n');
 }
 
@@ -60,28 +60,28 @@ function getUserPrompt() {
     '你是 bao，一个万能私人助手。用中文回复。',
     `当前工作目录: ${process.cwd()}`,
     `用户文档目录: ${USER_DOCS_DIR}`,
-    '你可以帮用户完成各种任务：回答问题、翻译、总结、数据分析、写作等。',
+    '',
+    '## 回复规则（极其重要）',
+    '- **只输出最终结果**，不要输出思考过程、尝试步骤',
+    '- **不要解释你在做什么**，直接做然后给结果',
+    '- **不要说"让我..."、"我来..."**这类话',
+    '- **简短直接**，一句话能说清的不要用两句',
     '',
     '## 权限',
-    '  - 可以用 bash 执行只读命令：ls, cat, head, tail, grep, find, wc, curl, wget, df, du, date, whoami, uname, ps, top',
-    '  - 可以用 read 工具读取文件',
-    '  - 禁止执行任何写入、修改、删除操作（write, edit, rm, mv, cp, mkdir, chmod, chown, apt, npm install 等）',
-    '  - 禁止执行 sudo、shutdown、reboot、kill、pkill 等危险命令',
-    '  - 如果用户要求你做禁止的操作，礼貌地告知权限不足，建议联系管理员',
+    '- 只读命令：ls, cat, grep, find, curl, wget 等',
+    '- 禁止写入、删除、修改操作',
+    '- 权限不足时简短告知',
     '',
-    '## 文件操作规则（重要）',
-    `- **文件分析范围限制**：只能在以下位置分析文件：`,
-    `  1. 用户文档目录: ${USER_DOCS_DIR}`,
-    `  2. 用户上传的文件`,
-    `- **禁止扫描其他目录**：不要扫描 /home、/etc、/var 等系统目录`,
-    '- 当用户上传任何文件时，告知用户你可以分析该文件，但无法保存（需要管理员权限）',
+    '## 文件操作',
+    `- 范围：${USER_DOCS_DIR} 和上传文件`,
+    '- 禁止扫描系统目录',
     '',
     installedSkillsPrompt,
-    '## 技能扩展规则',
-    '1. **优先使用已安装的技能**：上面列出的技能已经安装，直接使用即可',
-    '2. **只有当已安装技能无法满足需求时**，才使用 find-skills 搜索新技能',
+    '## 技能',
+    '- 优先用已安装技能，直接用不要解释',
+    '- 没有才搜索新技能',
     '',
-    '保持简洁、有用、接地气。不要说废话。',
+    '简洁、直接、有用。',
   ].join('\n');
 }
 
@@ -176,10 +176,9 @@ export async function runAgent(session, userText, progress, ctx) {
     } catch {}
   };
 
-  const sendTyping = async () => {
-    try {
-      await ctx.api.sendChatAction(chatId, 'typing');
-    } catch {}
+  const sendTyping = () => {
+    // 不等待，避免阻塞
+    ctx.api.sendChatAction(chatId, 'typing').catch(() => {});
   };
 
   const startTypingTimer = () => {
@@ -196,15 +195,23 @@ export async function runAgent(session, userText, progress, ctx) {
   };
 
   const doUpdate = async () => {
-    if (isUpdating) return;
-    if (fullResponse === lastDisplayedText) return;
+    if (isUpdating) {
+      console.log('[Stream] 跳过更新: isUpdating=true');
+      return;
+    }
+    if (fullResponse === lastDisplayedText && !toolName) return;
     
     isUpdating = true;
-    lastDisplayedText = fullResponse;
+    const updateStart = Date.now();
     
     let displayText = fullResponse;
     if (fullResponse.length > TG_MAX_LEN - 100) {
       displayText = '...\n\n' + fullResponse.slice(-(TG_MAX_LEN - 100));
+    }
+    
+    // 如果正在执行工具，显示工具状态
+    if (toolName) {
+      displayText += `\n\n🔧 正在执行: ${toolName}...`;
     }
     displayText += ' ▌';
     
@@ -212,18 +219,26 @@ export async function runAgent(session, userText, progress, ctx) {
     const telegramText = convertToTelegramMarkdown(displayText);
     
     if (streamMsgId && chatId) {
-      // 每次更新前发送 typing 动画（核心技巧4）
-      await sendTyping();
+      // 不等待 typing，避免阻塞
+      sendTyping();
       
       try {
         await ctx.api.editMessageText(chatId, streamMsgId, telegramText, { parse_mode: 'Markdown' });
-      } catch {
+        lastDisplayedText = fullResponse;
+      } catch (err) {
+        // Markdown 失败时回退到纯文本
         try {
-          // Markdown 失败时回退到纯文本
           await ctx.api.editMessageText(chatId, streamMsgId, displayText);
+          lastDisplayedText = fullResponse;
         } catch {}
       }
     }
+    
+    const updateDuration = Date.now() - updateStart;
+    if (updateDuration > 500) {
+      console.log(`[Stream] 更新耗时过长: ${updateDuration}ms`);
+    }
+    
     isUpdating = false;
   };
 
@@ -277,8 +292,12 @@ export async function runAgent(session, userText, progress, ctx) {
         break;
       case 'tool_call_start':
         toolName = e.name || 'tool';
+        console.log(`[Stream] 工具调用开始: ${toolName}`);
+        doUpdate(); // 立即更新显示工具状态
         break;
       case 'tool_call_end':
+        console.log(`[Stream] 工具调用结束: ${toolName}`);
+        toolName = ''; // 清除工具名
         break;
     }
   });

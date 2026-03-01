@@ -150,18 +150,22 @@ export function getInstalledSkillsPrompt() {
     return '';
   }
   
-  let prompt = '## 已安装的技能（优先使用）\n';
-  prompt += '以下技能已安装在本地，请优先使用，无需重新搜索安装：\n\n';
+  let prompt = '## 已安装的技能（必须优先使用）\n';
+  prompt += '以下技能已安装，**直接使用，不要搜索**：\n\n';
   
   for (const skill of skills) {
     prompt += `- **${skill.name}**`;
     if (skill.description && skill.description !== skill.name) {
       prompt += `: ${skill.description}`;
     }
-    prompt += '\n';
+    prompt += ` → 用 \`read ${skill.path}/SKILL.md\` 查看用法\n`;
   }
   
-  prompt += '\n只有当以上技能无法满足需求时，才使用 find-skills 搜索新技能。\n';
+  prompt += '\n**使用技能的步骤**：\n';
+  prompt += '1. 先用 `read` 读取技能的 SKILL.md 文件了解用法\n';
+  prompt += '2. 按照 SKILL.md 中的说明执行（通常是 curl 或 bash 命令）\n';
+  prompt += '3. 只输出最终结果，不要输出中间过程\n';
+  prompt += '\n**禁止**：不要尝试直接运行技能名作为命令，不要搜索已安装的技能。\n';
   
   return prompt;
 }

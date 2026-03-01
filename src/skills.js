@@ -17,6 +17,7 @@ const SKILL_DIRS = [
   resolve(AGENT_DIR, 'skills'),           // 项目: .pi/agent/skills/
   resolve(process.cwd(), '.pi', 'skills'), // 项目: .pi/skills/
   resolve(homedir(), '.pi', 'agent', 'skills'), // 全局: ~/.pi/agent/skills/
+  resolve(homedir(), '.agents', 'skills'), // 全局: ~/.agents/skills/ (PI SDK 实际存储位置)
 ];
 
 // 缓存已安装的 skill 列表

@@ -9,4 +9,5 @@ services:
       - ./data:/app/data
       - ./.pi:/app/.pi
       - ./skills:/root/.pi/agent/skills
+      - ./agents-skills:/root/.agents/skills
       - /home/administrator/Documents:/home/administrator/Documents

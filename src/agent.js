@@ -32,11 +32,12 @@ function getAdminPrompt() {
     `用户文档目录: ${USER_DOCS_DIR}`,
     '你拥有服务器完整权限：可以通过 bash 执行任意命令、读写编辑任何文件、访问网络（curl/wget）。',
     '',
-    '## 回复规则',
-    '- **不要输出思考过程**：不要说"让我..."、"我来检查..."、"首先我需要..."',
-    '- **内容要完整**：结果要有结构、有条理，该有的信息都要有',
+    '## 回复规则（必须遵守）',
+    '- **一次执行**：执行一次命令就返回结果，不要反复尝试不同方式',
+    '- **不要输出思考过程**：不要说"让我..."、"让我尝试..."、"我来检查..."',
     '- **直接给结果**：执行完直接展示结果，不要描述你做了什么',
-    '- **格式清晰**：适当使用标题、列表、代码块等格式',
+    '- **内容完整**：结果要有结构、有条理',
+    '- **失败就说失败**：如果一次执行失败，直接告诉用户失败原因，不要自动重试多次',
     '',
     '## 文件操作规则',
     `- 文件分析范围：${USER_DOCS_DIR} 和 /app/uploads`,
@@ -226,6 +227,8 @@ export async function runAgent(session, userText, progress, ctx) {
     if (isUpdating) return;
     if (fullResponse === lastDisplayedText && !toolName) return;
     
+    const updateStart = Date.now();
+    
     // 有内容后停止加载动画
     if (fullResponse.trim()) {
       stopLoadingAnimation();
@@ -257,17 +260,20 @@ export async function runAgent(session, userText, progress, ctx) {
         await ctx.api.editMessageText(chatId, streamMsgId, telegramText, { parse_mode: 'Markdown' });
         lastDisplayedText = fullResponse;
       } catch (err) {
+        console.log(`[Stream] Markdown编辑失败: ${err.message}, 尝试纯文本`);
         // Markdown 失败时回退到纯文本
         try {
           await ctx.api.editMessageText(chatId, streamMsgId, displayText);
           lastDisplayedText = fullResponse;
-        } catch {}
+        } catch (err2) {
+          console.log(`[Stream] 纯文本编辑也失败: ${err2.message}`);
+        }
       }
     }
     
     const updateDuration = Date.now() - updateStart;
-    if (updateDuration > 500) {
-      console.log(`[Stream] 更新耗时过长: ${updateDuration}ms`);
+    if (updateDuration > 300) {
+      console.log(`[Stream] 更新耗时: ${updateDuration}ms, 文本长度: ${displayText.length}`);
     }
     
     isUpdating = false;
@@ -285,21 +291,38 @@ export async function runAgent(session, userText, progress, ctx) {
     }
   };
 
+  let lastEventTime = Date.now();
+  
   const unsub = session.subscribe((event) => {
-    if (event.type === 'message_end' && event.message?.errorMessage) {
-      const msg = event.message.errorMessage;
-      if (msg.includes('quota') || msg.includes('429')) {
-        lastError = { status: 429, message: '请求过于频繁或配额已用完' };
-      } else if (msg.includes('500') || msg.includes('unavailable')) {
-        lastError = { status: 500, message: 'AI 服务暂时不可用' };
-      } else {
-        lastError = { status: 0, message: msg.slice(0, 200) };
+    const now = Date.now();
+    const gap = now - lastEventTime;
+    
+    // 记录事件间隔超过3秒的情况
+    if (gap > 3000) {
+      console.log(`[Stream] ⚠️ 事件间隔: ${gap}ms, 类型: ${event.type}`);
+    }
+    lastEventTime = now;
+    
+    if (event.type === 'message_end') {
+      console.log(`[Stream] message_end, 响应长度: ${fullResponse.length}`);
+      if (event.message?.errorMessage) {
+        console.log(`[Stream] 错误: ${event.message.errorMessage}`);
+        const msg = event.message.errorMessage;
+        if (msg.includes('quota') || msg.includes('429')) {
+          lastError = { status: 429, message: '请求过于频繁或配额已用完' };
+        } else if (msg.includes('500') || msg.includes('unavailable')) {
+          lastError = { status: 500, message: 'AI 服务暂时不可用' };
+        } else {
+          lastError = { status: 0, message: msg.slice(0, 200) };
+        }
       }
     }
     if (event.type === 'error') {
+      console.log(`[Stream] error 事件:`, event.error);
       lastError = event.error;
     }
     if (event.type === 'auto_retry_start') {
+      console.log(`[Stream] auto_retry_start: ${event.errorMessage}`);
       try {
         const errData = JSON.parse(event.errorMessage || '{}');
         const innerErr = JSON.parse(errData.error?.message || '{}');
@@ -323,12 +346,12 @@ export async function runAgent(session, userText, progress, ctx) {
         break;
       case 'tool_call_start':
         toolName = e.name || 'tool';
-        console.log(`[Stream] 工具调用开始: ${toolName}`);
-        doUpdate(); // 立即更新显示工具状态
+        console.log(`[Stream] 工具开始: ${toolName}`);
+        doUpdate();
         break;
       case 'tool_call_end':
-        console.log(`[Stream] 工具调用结束: ${toolName}`);
-        toolName = ''; // 清除工具名
+        console.log(`[Stream] 工具结束: ${toolName}`);
+        toolName = '';
         break;
     }
   });

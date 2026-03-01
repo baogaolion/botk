@@ -97,10 +97,36 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
   // 技能列表
   bot.callbackQuery('skills_list', async (ctx) => {
     await ctx.answerCallbackQuery();
-    await ctx.reply(
-      '📚 技能列表\n\n🔧 内置: read, write, edit, bash\n🔌 预置: find-skills\n\n💡 需要时自动搜索安装更多！',
-      { reply_markup: createMainMenuKb() }
-    );
+    
+    // 重新扫描已安装的技能
+    const { scanInstalledSkills, getInstalledSkills } = await import('../skills.js');
+    scanInstalledSkills();
+    const installedSkills = getInstalledSkills();
+    const customSkills = installedSkills.filter(s => s.name !== 'find-skills');
+    
+    let text = '📚 技能列表\n\n' +
+      '🔧 内置工具:\n' +
+      '  read - 读取文件\n' +
+      '  write - 写入文件\n' +
+      '  edit - 编辑文件\n' +
+      '  bash - 执行命令\n\n' +
+      '🔌 预置技能:\n' +
+      '  find-skills - 搜索安装新技能\n';
+    
+    if (customSkills.length > 0) {
+      text += '\n📦 已安装技能:\n';
+      for (const skill of customSkills) {
+        text += `  ${skill.name}`;
+        if (skill.description && skill.description !== skill.name) {
+          text += ` - ${skill.description}`;
+        }
+        text += '\n';
+      }
+    }
+    
+    text += '\n💡 已安装的技能会优先使用，无需重新搜索！';
+    
+    await ctx.reply(text, { reply_markup: createMainMenuKb() });
   });
 
   // 帮助

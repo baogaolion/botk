@@ -173,9 +173,13 @@ export async function runAgent(session, userText, progress, ctx) {
   const initStreamMsg = async () => {
     if (streamMsgId) return;
     try {
+      console.log(`[Stream] 初始化流式消息`);
       const msg = await ctx.reply(loadingFrames[0]);
       streamMsgId = msg.message_id;
-    } catch {}
+      console.log(`[Stream] 消息ID: ${streamMsgId}`);
+    } catch (err) {
+      console.log(`[Stream] 初始化失败: ${err.message}`);
+    }
   };
 
   const sendTyping = () => {
@@ -235,8 +239,14 @@ export async function runAgent(session, userText, progress, ctx) {
   };
 
   const doUpdate = async () => {
-    if (isUpdating) return;
-    if (fullResponse === lastDisplayedText && !toolName) return;
+    if (isUpdating) {
+      // console.log(`[Stream] 跳过更新: 正在更新中`);
+      return;
+    }
+    if (fullResponse === lastDisplayedText && !toolName) {
+      // console.log(`[Stream] 跳过更新: 无变化`);
+      return;
+    }
     
     const updateStart = Date.now();
     
@@ -361,35 +371,56 @@ export async function runAgent(session, userText, progress, ctx) {
         fullResponse += e.delta;
         startUpdateTimer();
         break;
-      case 'tool_call_start':
-        toolName = e.name || 'tool';
+      case 'text_start':
+        // 文本开始，准备接收内容
+        break;
+      case 'text_end':
+        // 文本结束
+        break;
+      case 'toolcall_start':
+        // PI SDK 使用 toolcall_start 而不是 tool_call_start
+        toolName = e.name || e.toolName || 'tool';
         console.log(`[Stream] 工具开始: ${toolName}`);
         doUpdate();
         break;
-      case 'tool_call_end':
+      case 'toolcall_delta':
+        // 工具调用参数增量，忽略
+        break;
+      case 'toolcall_end':
         console.log(`[Stream] 工具结束: ${toolName}`);
-        toolName = '';
+        // 不立即清除 toolName，等工具执行完再清除
         break;
-      case 'tool_result':
-        console.log(`[Stream] 工具结果: ${toolName}`);
-        break;
-      default:
-        console.log(`[Stream] 助手事件: ${e.type}`);
-        break;
+    }
+  });
+  
+  // 监听工具执行事件
+  const toolUnsub = session.subscribe((event) => {
+    if (event.type === 'tool_execution_start') {
+      console.log(`[Stream] 工具执行开始`);
+    } else if (event.type === 'tool_execution_end') {
+      console.log(`[Stream] 工具执行结束`);
+      toolName = ''; // 工具执行完毕，清除工具名
+      doUpdate();
     }
   });
 
   try {
+    console.log(`[Stream] 开始处理: ${userText.slice(0, 50)}...`);
     startTypingTimer();
     await initStreamMsg();
     startLoadingAnimation(); // 启动加载动画
     startUpdateTimer();
+    console.log(`[Stream] 调用 AI...`);
     await session.prompt(userText);
+    console.log(`[Stream] AI 响应完成, 响应长度: ${fullResponse.length}`);
   } finally {
+    console.log(`[Stream] 清理定时器...`);
     stopUpdateTimer();
     stopTypingTimer();
     stopLoadingAnimation(); // 停止加载动画
     unsub();
+    toolUnsub();
+    console.log(`[Stream] 最终更新消息`);
     await doUpdate();
   }
 

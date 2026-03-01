@@ -8,4 +8,5 @@ services:
       - ./uploads:/app/uploads
       - ./data:/app/data
       - ./.pi:/app/.pi
+      - ./skills:/root/.pi/agent/skills
       - /home/administrator/Documents:/home/administrator/Documents

@@ -1,70 +1,110 @@
 /**
  * Skill 管理模块
  * 扫描已安装的 skill，优先使用本地 skill
+ * 
+ * PI SDK skill 位置：
+ * - 全局: ~/.pi/agent/skills/
+ * - 项目: .pi/agent/skills/ 或 .pi/skills/
  */
 
 import { resolve } from 'path';
 import { readdirSync, existsSync, readFileSync } from 'fs';
+import { homedir } from 'os';
 import { AGENT_DIR } from './config.js';
 
-const SKILLS_DIR = resolve(AGENT_DIR, 'skills');
+// 所有可能的 skill 目录
+const SKILL_DIRS = [
+  resolve(AGENT_DIR, 'skills'),           // 项目: .pi/agent/skills/
+  resolve(process.cwd(), '.pi', 'skills'), // 项目: .pi/skills/
+  resolve(homedir(), '.pi', 'agent', 'skills'), // 全局: ~/.pi/agent/skills/
+];
 
 // 缓存已安装的 skill 列表
 let installedSkills = [];
 
 /**
+ * 扫描单个目录下的 skill
+ */
+function scanSkillDir(skillsDir, foundNames) {
+  if (!existsSync(skillsDir)) return;
+  
+  try {
+    const entries = readdirSync(skillsDir, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      // 处理目录（包含 SKILL.md）
+      if (entry.isDirectory()) {
+        const skillName = entry.name;
+        if (foundNames.has(skillName)) continue; // 避免重复
+        
+        const skillPath = resolve(skillsDir, skillName);
+        const skillMdPath = resolve(skillPath, 'SKILL.md');
+        
+        if (existsSync(skillMdPath)) {
+          const skillInfo = parseSkillMd(skillMdPath, skillName, skillPath);
+          installedSkills.push(skillInfo);
+          foundNames.add(skillName);
+        }
+      }
+      // 处理直接的 .md 文件（根目录的 skill 文件）
+      else if (entry.isFile() && entry.name.endsWith('.md') && entry.name !== 'README.md') {
+        const skillName = entry.name.replace(/\.md$/, '');
+        if (foundNames.has(skillName)) continue;
+        
+        const skillPath = resolve(skillsDir, entry.name);
+        const skillInfo = parseSkillMd(skillPath, skillName, skillsDir);
+        installedSkills.push(skillInfo);
+        foundNames.add(skillName);
+      }
+    }
+  } catch (err) {
+    console.error(`[Skills] 扫描 ${skillsDir} 失败:`, err.message);
+  }
+}
+
+/**
+ * 解析 SKILL.md 文件
+ */
+function parseSkillMd(mdPath, skillName, skillPath) {
+  let description = '';
+  let keywords = [];
+  
+  try {
+    const content = readFileSync(mdPath, 'utf-8');
+    // 提取第一行作为描述（通常是 # 标题）
+    const firstLine = content.split('\n').find(line => line.trim());
+    if (firstLine) {
+      description = firstLine.replace(/^#+\s*/, '').trim();
+    }
+    // 提取关键词（如果有 keywords: 行）
+    const keywordsMatch = content.match(/keywords?:\s*(.+)/i);
+    if (keywordsMatch) {
+      keywords = keywordsMatch[1].split(/[,，]/).map(k => k.trim()).filter(Boolean);
+    }
+  } catch {}
+  
+  return {
+    name: skillName,
+    path: skillPath,
+    description: description || skillName,
+    keywords
+  };
+}
+
+/**
  * 扫描已安装的 skill
- * 读取每个 skill 目录下的 SKILL.md 获取描述
+ * 读取多个目录下的 SKILL.md 获取描述
  */
 export function scanInstalledSkills() {
   installedSkills = [];
+  const foundNames = new Set();
   
-  if (!existsSync(SKILLS_DIR)) {
-    return installedSkills;
+  for (const dir of SKILL_DIRS) {
+    scanSkillDir(dir, foundNames);
   }
   
-  try {
-    const dirs = readdirSync(SKILLS_DIR, { withFileTypes: true });
-    
-    for (const dir of dirs) {
-      if (!dir.isDirectory()) continue;
-      
-      const skillName = dir.name;
-      const skillPath = resolve(SKILLS_DIR, skillName);
-      const skillMdPath = resolve(skillPath, 'SKILL.md');
-      
-      let description = '';
-      let keywords = [];
-      
-      // 尝试读取 SKILL.md 获取描述
-      if (existsSync(skillMdPath)) {
-        try {
-          const content = readFileSync(skillMdPath, 'utf-8');
-          // 提取第一行作为描述（通常是 # 标题）
-          const firstLine = content.split('\n').find(line => line.trim());
-          if (firstLine) {
-            description = firstLine.replace(/^#+\s*/, '').trim();
-          }
-          // 提取关键词（如果有 keywords: 行）
-          const keywordsMatch = content.match(/keywords?:\s*(.+)/i);
-          if (keywordsMatch) {
-            keywords = keywordsMatch[1].split(/[,，]/).map(k => k.trim()).filter(Boolean);
-          }
-        } catch {}
-      }
-      
-      installedSkills.push({
-        name: skillName,
-        path: skillPath,
-        description: description || skillName,
-        keywords
-      });
-    }
-  } catch (err) {
-    console.error('[Skills] 扫描失败:', err.message);
-  }
-  
-  console.log(`[Skills] 已安装 ${installedSkills.length} 个技能:`, installedSkills.map(s => s.name).join(', '));
+  console.log(`[Skills] 扫描目录: ${SKILL_DIRS.filter(d => existsSync(d)).join(', ')}`);
+  console.log(`[Skills] 已安装 ${installedSkills.length} 个技能:`, installedSkills.map(s => s.name).join(', ') || '无');
   return installedSkills;
 }
 

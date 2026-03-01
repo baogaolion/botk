@@ -6,11 +6,8 @@ import { InlineKeyboard } from 'grammy';
 
 // 主菜单键盘
 export const welcomeKb = new InlineKeyboard()
-  .text('💡 我能做什么', 'examples')
-  .text('⚙️ 系统状态', 'cb_status')
-  .row()
-  .text('📚 已装技能', 'skills_list')
-  .text('❓ 帮助', 'cb_help')
+  .text(' 已装技能', 'skills_list')
+  .text('🤖 切换模型', 'select_model')
   .row()
   .text('📬 客户咨询', 'submissions_menu');
 

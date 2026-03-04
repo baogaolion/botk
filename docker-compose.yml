@@ -11,3 +11,10 @@ services:
       - ./skills:/root/.pi/agent/skills
       - ./agents-skills:/root/.agents/skills
       - /home/administrator/Documents:/home/administrator/Documents
+    networks:
+      - default
+      - vsmaios-net
+
+networks:
+  vsmaios-net:
+    external: true

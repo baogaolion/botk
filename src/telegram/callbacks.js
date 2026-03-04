@@ -9,17 +9,18 @@ import { getPgPool, querySubmissions, markAsCompleted } from '../submissions.js'
 import { welcomeKb, createMainMenuKb, createModelKb, createSubmissionsMenuKb, createSubmissionsListKb } from './keyboards.js';
 import { isAdmin, isAllowed, sessionKey, touchUser } from './commands.js';
 import { userRepo } from '../../db.js';
+import { wrapCallback } from './errorHandler.js';
 
 export function registerCallbacks(bot, runningTasks, lastMessages, processUserMessage) {
   
   // 主菜单
-  bot.callbackQuery('main_menu', async (ctx) => {
+  bot.callbackQuery('main_menu', wrapCallback(async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.reply('hi 我是 bao, 懒病又犯了吗碧池', { reply_markup: welcomeKb });
-  });
+  }));
 
   // 示例
-  bot.callbackQuery('examples', async (ctx) => {
+  bot.callbackQuery('examples', wrapCallback(async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.reply(
       '💡 使用示例：\n\n' +
@@ -33,10 +34,10 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
       '直接说就行！',
       { reply_markup: createMainMenuKb() }
     );
-  });
+  }));
 
   // 系统状态
-  bot.callbackQuery('cb_status', async (ctx) => {
+  bot.callbackQuery('cb_status', wrapCallback(async (ctx) => {
     await ctx.answerCallbackQuery();
     const up = process.uptime();
     const mem = process.memoryUsage();
@@ -49,10 +50,10 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
       `📡 模型: ${getCurrentModelName()}`,
       { reply_markup: new InlineKeyboard().text('📡 切换模型', 'show_models').row().text('🏠 主菜单', 'main_menu') }
     );
-  });
+  }));
 
   // 显示模型列表
-  bot.callbackQuery('show_models', async (ctx) => {
+  bot.callbackQuery('show_models', wrapCallback(async (ctx) => {
     await ctx.answerCallbackQuery();
     if (!isAdmin(ctx)) {
       await ctx.reply('⚠️ 仅管理员可切换模型。', { reply_markup: createMainMenuKb() });
@@ -70,10 +71,10 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
     });
     text += `\n当前: ${getCurrentModelName()}`;
     await ctx.reply(text, { reply_markup: createModelKb(available, getCurrentModelIndex()) });
-  });
+  }));
 
   // 切换模型
-  bot.callbackQuery(/^set_model_(\d+)$/, async (ctx) => {
+  bot.callbackQuery(/^set_model_(\d+)$/, wrapCallback(async (ctx) => {
     if (!isAdmin(ctx)) {
       await ctx.answerCallbackQuery({ text: '仅管理员可切换模型' });
       return;
@@ -92,10 +93,10 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
     } else {
       await ctx.answerCallbackQuery({ text: '无效的模型索引' });
     }
-  });
+  }));
 
   // 技能列表
-  bot.callbackQuery('skills_list', async (ctx) => {
+  bot.callbackQuery('skills_list', wrapCallback(async (ctx) => {
     await ctx.answerCallbackQuery();
     
     // 重新扫描已安装的技能
@@ -122,43 +123,44 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
         }
         text += '\n';
       }
+      text += '\n💡 已安装的技能会优先使用，无需重新搜索！';
+    } else {
+      text += '\n📦 已安装技能: 无\n\n💡 使用 find-skills 可以搜索和安装新技能！';
     }
     
-    text += '\n💡 已安装的技能会优先使用，无需重新搜索！';
-    
     await ctx.reply(text, { reply_markup: createMainMenuKb() });
-  });
+  }));
 
   // 帮助
-  bot.callbackQuery('cb_help', async (ctx) => {
+  bot.callbackQuery('cb_help', wrapCallback(async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.reply(
       '📖 使用方法\n\n直接发消息描述你的需求即可。\n发文件给我，我会帮你处理。\n\n' +
       '命令: /cancel 取消 | /clear 清除 | /mydata 数据 | /status 状态',
       { reply_markup: createMainMenuKb() }
     );
-  });
+  }));
 
   // 取消任务
-  bot.callbackQuery('cancel_task', async (ctx) => {
+  bot.callbackQuery('cancel_task', wrapCallback(async (ctx) => {
     if (!isAllowed(ctx)) { await ctx.answerCallbackQuery(); return; }
     await ctx.answerCallbackQuery({ text: '正在取消...' });
     const key = sessionKey(ctx);
     const session = getSession(key);
     if (session) try { await session.abort(); } catch {}
-  });
+  }));
 
   // 清除会话
-  bot.callbackQuery('clear_session', async (ctx) => {
+  bot.callbackQuery('clear_session', wrapCallback(async (ctx) => {
     if (!isAllowed(ctx)) { await ctx.answerCallbackQuery(); return; }
     await ctx.answerCallbackQuery({ text: '对话已清除' });
     const key = sessionKey(ctx);
     deleteSession(key);
     lastMessages.delete(key);
-  });
+  }));
 
   // 重试任务
-  bot.callbackQuery('retry_task', async (ctx) => {
+  bot.callbackQuery('retry_task', wrapCallback(async (ctx) => {
     if (!isAllowed(ctx)) { await ctx.answerCallbackQuery(); return; }
     await ctx.answerCallbackQuery({ text: '重试中...' });
     const key = sessionKey(ctx);
@@ -166,10 +168,10 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
     if (lastMsg) {
       await processUserMessage(ctx, lastMsg);
     }
-  });
+  }));
 
   // 确认删除
-  bot.callbackQuery('confirm_delete', async (ctx) => {
+  bot.callbackQuery('confirm_delete', wrapCallback(async (ctx) => {
     if (!isAllowed(ctx)) { await ctx.answerCallbackQuery(); return; }
     await ctx.answerCallbackQuery();
     await ctx.reply(
@@ -180,10 +182,10 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
           .text('❌ 不，保留', 'main_menu'),
       }
     );
-  });
+  }));
 
   // 执行删除
-  bot.callbackQuery('do_delete', async (ctx) => {
+  bot.callbackQuery('do_delete', wrapCallback(async (ctx) => {
     if (!isAllowed(ctx)) { await ctx.answerCallbackQuery(); return; }
     await ctx.answerCallbackQuery({ text: '数据已删除' });
     const key = sessionKey(ctx);
@@ -191,12 +193,12 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
     lastMessages.delete(key);
     const count = userRepo.deleteAllData(ctx.from.id);
     await ctx.reply(`🗑 已删除你的所有数据（${count} 个文件已清理）。`, { reply_markup: welcomeKb });
-  });
+  }));
 
   // ==================== 客户咨询回调 ====================
 
   // 咨询菜单
-  bot.callbackQuery('submissions_menu', async (ctx) => {
+  bot.callbackQuery('submissions_menu', wrapCallback(async (ctx) => {
     await ctx.answerCallbackQuery();
     if (!isAdmin(ctx)) {
       await ctx.reply('⚠️ 仅管理员可查看客户咨询。');
@@ -206,11 +208,11 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
       await ctx.reply('⚠️ 未配置 PostgreSQL 数据库。');
       return;
     }
-    await ctx.editMessageText('📬 客户咨询管理', { reply_markup: createSubmissionsMenuKb() });
-  });
+    await ctx.reply('📬 客户咨询管理', { reply_markup: createSubmissionsMenuKb() });
+  }));
 
   // 咨询列表
-  bot.callbackQuery(/^submissions_(processing|completed|all)_(\d+)$/, async (ctx) => {
+  bot.callbackQuery(/^submissions_(processing|completed|all)_(\d+)$/, wrapCallback(async (ctx) => {
     await ctx.answerCallbackQuery();
     if (!isAdmin(ctx) || !getPgPool()) return;
     
@@ -251,10 +253,10 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
     } catch (err) {
       await ctx.editMessageText(`❌ 查询失败: ${err.message}`);
     }
-  });
+  }));
 
   // 标记已处理
-  bot.callbackQuery(/^mark_completed_(\d+)$/, async (ctx) => {
+  bot.callbackQuery(/^mark_completed_(\d+)$/, wrapCallback(async (ctx) => {
     await ctx.answerCallbackQuery({ text: '已标记为已处理' });
     if (!isAdmin(ctx) || !getPgPool()) return;
     
@@ -265,10 +267,10 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
       const msgText = ctx.callbackQuery.message?.text || '';
       await ctx.editMessageText(msgText + '\n\n✅ 已标记为已处理');
     }
-  });
+  }));
 
   // 文件处理回调
-  bot.callbackQuery(/^file_/, async (ctx) => {
+  bot.callbackQuery(/^file_/, wrapCallback(async (ctx) => {
     await ctx.answerCallbackQuery();
     const key = sessionKey(ctx);
     const fileInfo = lastMessages.get(key) || '';
@@ -286,10 +288,10 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
     if (action) {
       await processUserMessage(ctx, `${fileInfo}\n\n${action}`);
     }
-  });
+  }));
 
   // 默认回调处理
-  bot.on('callback_query:data', async (ctx) => {
+  bot.on('callback_query:data', wrapCallback(async (ctx) => {
     await ctx.answerCallbackQuery();
-  });
+  }));
 }

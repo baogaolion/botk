@@ -79,7 +79,15 @@ async function main() {
   }
 
   // 错误处理
-  bot.catch((err) => console.error('[Bot] grammY 错误:', err));
+  bot.catch((err) => {
+    // 429 限流错误：只记录简短日志
+    if (err.error?.error_code === 429 || err.message?.includes('429')) {
+      const retryAfter = err.error?.parameters?.retry_after || 'unknown';
+      console.log(`[Bot] ⚠️ Telegram 限流 (429), 需等待 ${retryAfter} 秒`);
+      return;
+    }
+    console.error('[Bot] grammY 错误:', err);
+  });
 
   function gracefulShutdown() {
     console.log('🛑 正在停机...');

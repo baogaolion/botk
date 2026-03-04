@@ -5,7 +5,7 @@
 import { InlineKeyboard } from 'grammy';
 import { getAvailableModels, getCurrentModelName, getCurrentModelIndex, setCurrentModelIndex } from '../models.js';
 import { getSession, deleteSession, getSessionKeys } from '../session.js';
-import { getPgPool, querySubmissions, markAsDone } from '../submissions.js';
+import { getPgPool, querySubmissions, markAsCompleted } from '../submissions.js';
 import { welcomeKb, createMainMenuKb, createModelKb, createSubmissionsMenuKb, createSubmissionsListKb } from './keyboards.js';
 import { isAdmin, isAllowed, sessionKey, touchUser } from './commands.js';
 import { userRepo } from '../../db.js';
@@ -210,18 +210,18 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
   });
 
   // 咨询列表
-  bot.callbackQuery(/^submissions_(processing|done|all)_(\d+)$/, async (ctx) => {
+  bot.callbackQuery(/^submissions_(processing|completed|all)_(\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     if (!isAdmin(ctx) || !getPgPool()) return;
     
-    const match = ctx.callbackQuery.data.match(/^submissions_(processing|done|all)_(\d+)$/);
+    const match = ctx.callbackQuery.data.match(/^submissions_(processing|completed|all)_(\d+)$/);
     const filter = match[1];
     const offset = parseInt(match[2]);
     const limit = 5;
     
     let filterLabel = '全部';
     if (filter === 'processing') filterLabel = '🟡 处理中';
-    else if (filter === 'done') filterLabel = '✅ 已处理';
+    else if (filter === 'completed') filterLabel = '✅ 已处理';
     
     try {
       const { rows, total } = await querySubmissions(filter, offset, limit);
@@ -237,7 +237,7 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
       
       for (const row of rows) {
         const time = new Date(row.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
-        const statusIcon = row.status === 'done' ? '✅' : (row.status === 'processing' ? '🟡' : '⚪');
+        const statusIcon = row.status === 'completed' ? '✅' : (row.status === 'processing' ? '🟡' : '⚪');
         text += `━━━━━━━━━━━━━━━\n`;
         text += `#${row.id} ${statusIcon} ${row.name || '未知'}\n`;
         text += `📱 ${row.contact_method}: ${row.contact_value}\n`;
@@ -254,14 +254,14 @@ export function registerCallbacks(bot, runningTasks, lastMessages, processUserMe
   });
 
   // 标记已处理
-  bot.callbackQuery(/^mark_done_(\d+)$/, async (ctx) => {
+  bot.callbackQuery(/^mark_completed_(\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery({ text: '已标记为已处理' });
     if (!isAdmin(ctx) || !getPgPool()) return;
     
-    const match = ctx.callbackQuery.data.match(/^mark_done_(\d+)$/);
+    const match = ctx.callbackQuery.data.match(/^mark_completed_(\d+)$/);
     const id = parseInt(match[1]);
     
-    if (await markAsDone(id)) {
+    if (await markAsCompleted(id)) {
       const msgText = ctx.callbackQuery.message?.text || '';
       await ctx.editMessageText(msgText + '\n\n✅ 已标记为已处理');
     }

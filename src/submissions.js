@@ -83,8 +83,8 @@ export async function querySubmissions(filter, offset, limit) {
   let whereClause = '';
   if (filter === 'processing') {
     whereClause = "WHERE status = 'processing'";
-  } else if (filter === 'done') {
-    whereClause = "WHERE status = 'done'";
+  } else if (filter === 'completed') {
+    whereClause = "WHERE status = 'completed'";
   }
   
   const countResult = await pgPool.query(`SELECT COUNT(*) FROM vsmaios_contact_submission ${whereClause}`);
@@ -102,10 +102,10 @@ export async function querySubmissions(filter, offset, limit) {
 }
 
 // 标记为已处理
-export async function markAsDone(id) {
+export async function markAsCompleted(id) {
   if (!pgPool) return false;
   try {
-    await pgPool.query(`UPDATE vsmaios_contact_submission SET status = 'done' WHERE id = $1`, [id]);
+    await pgPool.query(`UPDATE vsmaios_contact_submission SET status = 'completed' WHERE id = $1`, [id]);
     return true;
   } catch (err) {
     console.error('[PG] 标记失败:', err.message);

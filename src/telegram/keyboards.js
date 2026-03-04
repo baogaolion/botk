@@ -39,7 +39,7 @@ export function createModelKb(models, currentIndex) {
 export function createSubmissionsMenuKb() {
   return new InlineKeyboard()
     .text('🟡 处理中', 'submissions_processing_0')
-    .text('✅ 已处理', 'submissions_done_0')
+    .text('✅ 已处理', 'submissions_completed_0')
     .row()
     .text('📝 全部', 'submissions_all_0')
     .text('🏠 主菜单', 'main_menu');
@@ -58,13 +58,13 @@ export function createSubmissionsListKb(filter, offset, limit, total, rows) {
   
   if (filter === 'processing') {
     for (const row of rows) {
-      kb.text(`✅ #${row.id}`, `mark_done_${row.id}`);
+      kb.text(`✅ #${row.id}`, `mark_completed_${row.id}`);
     }
     kb.row();
   }
   
   kb.text('🟡 处理中', 'submissions_processing_0')
-    .text('✅ 已处理', 'submissions_done_0')
+    .text('✅ 已处理', 'submissions_completed_0')
     .row()
     .text('🏠 主菜单', 'main_menu');
   

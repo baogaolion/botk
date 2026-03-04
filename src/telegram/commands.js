@@ -6,7 +6,7 @@ import { InlineKeyboard } from 'grammy';
 import { ADMIN_USER, ENV_ALLOWED_USERS } from '../config.js';
 import { getAvailableModels, getCurrentModelName, getCurrentModelIndex, setCurrentModelIndex } from '../models.js';
 import { getSession, deleteSession, getSessionCount, clearAllSessions } from '../session.js';
-import { getPgPool, querySubmissions, markAsDone } from '../submissions.js';
+import { getPgPool, querySubmissions, markAsCompleted } from '../submissions.js';
 import { formatBytes } from '../utils.js';
 import { getInstalledSkills, scanInstalledSkills } from '../skills.js';
 import { welcomeKb, createMainMenuKb, createModelKb, createSubmissionsMenuKb, createSubmissionsListKb } from './keyboards.js';

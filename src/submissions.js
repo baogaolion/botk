@@ -55,7 +55,7 @@ export async function pollNewSubmissions(bot) {
       try {
         await bot.api.sendMessage(ADMIN_USER, text, {
           reply_markup: new InlineKeyboard()
-            .text('✅ 标记已处理', `mark_done_${row.id}`)
+            .text('✅ 标记已处理', `mark_completed_${row.id}`)
         });
         await pgPool.query(`UPDATE vsmaios_contact_submission SET status = 'processing' WHERE id = $1`, [row.id]);
       } catch (err) {

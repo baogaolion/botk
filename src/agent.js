@@ -458,15 +458,35 @@ export async function runAgent(session, userText, progress, ctx) {
   const toolUnsub = session.subscribe((event) => {
     if (event.type === 'tool_execution_start') {
       toolTurnCount++;
-      console.log(`[Stream] 工具执行开始 (第 ${toolTurnCount}/${MAX_TOOL_TURNS} 轮)`);
+      console.log(`[Stream] ========== 工具执行开始 (第 ${toolTurnCount}/${MAX_TOOL_TURNS} 轮) ==========`);
+      console.log(`[Stream] 工具名称: ${event.tool?.name || '未知'}`);
+      if (event.tool?.input) {
+        console.log(`[Stream] 工具参数:`, JSON.stringify(event.tool.input, null, 2));
+      }
       
       // 超过最大轮次时中止
       if (toolTurnCount >= MAX_TOOL_TURNS) {
         console.log(`[Stream] ⚠️ 工具执行次数达到上限，中止会话`);
         session.abort();
       }
+    } else if (event.type === 'tool_execution_update') {
+      // 只记录关键的更新信息，避免日志过多
+      if (event.output) {
+        const preview = typeof event.output === 'string' 
+          ? event.output.substring(0, 200)
+          : JSON.stringify(event.output).substring(0, 200);
+        console.log(`[Stream] 工具执行更新: ${preview}${event.output.length > 200 ? '...' : ''}`);
+      }
     } else if (event.type === 'tool_execution_end') {
-      console.log(`[Stream] 工具执行结束`);
+      console.log(`[Stream] ========== 工具执行结束 ==========`);
+      if (event.output) {
+        console.log(`[Stream] 工具输出 (前500字符):`, typeof event.output === 'string' 
+          ? event.output.substring(0, 500)
+          : JSON.stringify(event.output).substring(0, 500));
+      }
+      if (event.error) {
+        console.log(`[Stream] ⚠️ 工具执行错误:`, event.error);
+      }
       toolName = ''; // 工具执行完毕，清除工具名
       doUpdate();
     }

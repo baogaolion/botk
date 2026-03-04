@@ -87,23 +87,33 @@ function parseSkillMd(mdPath, skillName, skillPath) {
   let keywords = [];
   let usageExample = '';
   
+  console.log(`[Skills] 解析 SKILL.md: ${mdPath}`);
+  
   try {
     const content = readFileSync(mdPath, 'utf-8');
+    console.log(`[Skills]   文件大小: ${content.length} 字符`);
+    
     // 提取第一行作为描述（通常是 # 标题）
     const firstLine = content.split('\n').find(line => line.trim());
     if (firstLine) {
       description = firstLine.replace(/^#+\s*/, '').trim();
+      console.log(`[Skills]   描述: ${description}`);
     }
+    
     // 提取关键词（如果有 keywords: 行）
     const keywordsMatch = content.match(/keywords?:\s*(.+)/i);
     if (keywordsMatch) {
       keywords = keywordsMatch[1].split(/[,，]/).map(k => k.trim()).filter(Boolean);
+      console.log(`[Skills]   关键词:`, keywords);
     }
     
     // 提取使用方式：查找代码块中的 curl 或 bash 命令
     const codeBlockMatch = content.match(/```(?:bash|sh|shell)?\s*\n([\s\S]*?)```/);
     if (codeBlockMatch) {
       usageExample = codeBlockMatch[1].trim();
+      console.log(`[Skills]   使用示例 (前100字符): ${usageExample.substring(0, 100)}`);
+    } else {
+      console.log(`[Skills]   未找到使用示例代码块`);
     }
     
     // 如果没有缓存且有使用方式，自动保存
@@ -111,10 +121,14 @@ function parseSkillMd(mdPath, skillName, skillPath) {
       const cached = skillUsageRepo.get(skillName);
       if (!cached) {
         skillUsageRepo.set(skillName, usageExample, description);
-        console.log(`[Skills] 自动缓存技能用法: ${skillName}`);
+        console.log(`[Skills] ✅ 自动缓存技能用法: ${skillName}`);
+      } else {
+        console.log(`[Skills] ✅ 技能已有缓存: ${skillName}`);
       }
     }
-  } catch {}
+  } catch (err) {
+    console.log(`[Skills] ⚠️ 解析失败: ${err.message}`);
+  }
   
   return {
     name: skillName,

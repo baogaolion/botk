@@ -190,12 +190,21 @@ export async function runAgent(session, userText, progress, ctx) {
   const initStreamMsg = async () => {
     if (streamMsgId) return;
     try {
-      console.log(`[Stream] 初始化流式消息`);
-      const msg = await ctx.reply(loadingFrames[0]);
+      console.log(`[Stream] 初始化流式消息 (使用 sendMessageDraft)`);
+      // 使用 sendMessageDraft 初始化流式消息
+      const msg = await ctx.api.callApi('sendMessageDraft', {
+        chat_id: chatId,
+        text: loadingFrames[0]
+      });
       streamMsgId = msg.message_id;
       console.log(`[Stream] 消息ID: ${streamMsgId}`);
     } catch (err) {
       console.log(`[Stream] 初始化失败: ${err.message}`);
+      // 回退到普通消息
+      try {
+        const msg = await ctx.reply(loadingFrames[0]);
+        streamMsgId = msg.message_id;
+      } catch {}
     }
   };
 
@@ -304,7 +313,12 @@ export async function runAgent(session, userText, progress, ctx) {
       sendTyping();
       
       try {
-        await ctx.api.editMessageText(chatId, streamMsgId, telegramText, { parse_mode: 'Markdown' });
+        // 使用 sendMessageDraft 更新流式消息
+        await ctx.api.callApi('sendMessageDraft', {
+          chat_id: chatId,
+          text: telegramText,
+          parse_mode: 'Markdown'
+        });
         lastSentText = displayText;
         lastDisplayedText = fullResponse;
       } catch (err) {
@@ -317,7 +331,10 @@ export async function runAgent(session, userText, progress, ctx) {
         } else if (!err.message?.includes('not modified')) {
           // Markdown 失败时回退到纯文本
           try {
-            await ctx.api.editMessageText(chatId, streamMsgId, displayText);
+            await ctx.api.callApi('sendMessageDraft', {
+              chat_id: chatId,
+              text: displayText
+            });
             lastSentText = displayText;
             lastDisplayedText = fullResponse;
           } catch (err2) {

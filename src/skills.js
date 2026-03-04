@@ -133,12 +133,28 @@ export function scanInstalledSkills() {
   installedSkills = [];
   const foundNames = new Set();
   
+  console.log('[Skills] ========== 开始扫描技能目录 ==========');
   for (const dir of SKILL_DIRS) {
+    console.log(`[Skills] 检查目录: ${dir}`);
+    console.log(`[Skills]   存在: ${existsSync(dir)}`);
+    if (existsSync(dir)) {
+      try {
+        const entries = readdirSync(dir);
+        console.log(`[Skills]   内容 (${entries.length} 项):`, entries.join(', '));
+      } catch (err) {
+        console.log(`[Skills]   读取失败: ${err.message}`);
+      }
+    }
     scanSkillDir(dir, foundNames);
   }
   
-  console.log(`[Skills] 扫描目录: ${SKILL_DIRS.filter(d => existsSync(d)).join(', ')}`);
+  console.log(`[Skills] ========== 扫描完成 ==========`);
   console.log(`[Skills] 已安装 ${installedSkills.length} 个技能:`, installedSkills.map(s => s.name).join(', ') || '无');
+  if (installedSkills.length > 0) {
+    installedSkills.forEach(s => {
+      console.log(`[Skills]   - ${s.name}: ${s.path}`);
+    });
+  }
   return installedSkills;
 }
 

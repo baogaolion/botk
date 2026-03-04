@@ -459,6 +459,7 @@ export async function runAgent(session, userText, progress, ctx) {
     if (event.type === 'tool_execution_start') {
       toolTurnCount++;
       console.log(`[Stream] ========== 工具执行开始 (第 ${toolTurnCount}/${MAX_TOOL_TURNS} 轮) ==========`);
+      console.log(`[Stream] 完整 event:`, JSON.stringify(event, null, 2));
       console.log(`[Stream] 工具名称: ${event.tool?.name || '未知'}`);
       if (event.tool?.input) {
         console.log(`[Stream] 工具参数:`, JSON.stringify(event.tool.input, null, 2));

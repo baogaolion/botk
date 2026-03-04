@@ -4,10 +4,11 @@
  */
 
 import { resolve } from 'path';
+import { homedir } from 'os';
 
 // ==================== 基础配置 ====================
 
-export const AGENT_DIR = resolve(process.cwd(), '.pi', 'agent');
+export const AGENT_DIR = resolve(homedir(), '.pi', 'agent');
 export const ADMIN_USER = Number(process.env.ADMIN_USER) || 0;
 export const ENV_ALLOWED_USERS = process.env.ALLOWED_USERS
   ? process.env.ALLOWED_USERS.split(',').map(id => Number(id.trim())).filter(Boolean)
